@@ -60,6 +60,7 @@ impl CPU {
     const RAM_SIZE: usize = 0xFFFF;
     const PROGRAM_ROM_START: u16 = 0x8000;
     const INITIAL_PROGRAM_COUNTER: u16 = 0xFFFC;
+    const BITS_IN_BYTE: u8 = 8;
 
     pub fn new() -> CPU {
         CPU {
@@ -93,8 +94,6 @@ impl CPU {
             AdressingMode::Immediate => self.program_counter,
             AdressingMode::Absolute => self.read_word(self.program_counter),
             AdressingMode::ZeroPage => self.read_byte(self.program_counter) as u16,
-
-            // LDA 0x5
 
             AdressingMode::ZeroPageX => self
                 .read_byte(self.program_counter)
@@ -134,9 +133,10 @@ impl CPU {
             }
         };
 
-        let mut new_pc = self.program_counter;
+        (addr, self.consume_params(mode))
+    }
 
-        // Consume parameters
+    fn consume_params(&self, mode: &AdressingMode) -> u16 {
         match mode {
             AdressingMode::NoneAddressing => panic!("no addressing mode, this should never occur"),
 
@@ -145,14 +145,12 @@ impl CPU {
             | AdressingMode::IndirectY
             | AdressingMode::ZeroPage
             | AdressingMode::ZeroPageX
-            | AdressingMode::ZeroPageY => new_pc += 1,
+            | AdressingMode::ZeroPageY => self.program_counter + 1,
 
             AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => {
-                new_pc += 2
+                self.program_counter + 2
             }
         }
-
-        (addr, new_pc)
     }
 
     pub fn run(&mut self) {
@@ -163,7 +161,8 @@ impl CPU {
             self.program_counter += 1;
 
             match opcode {
-                0x0 => return, // BRK
+                0xEA => continue, // NOP
+                0x00 => return,   // BRK
 
                 0xAA => self.tax(),
                 0xB8 => self.clv(),
@@ -186,6 +185,57 @@ impl CPU {
                 0xF6 => self.inc(&AdressingMode::ZeroPageX),
                 0xEE => self.inc(&AdressingMode::Absolute),
                 0xFE => self.inc(&AdressingMode::AbsoluteX),
+
+                0x4A => self.lsr(&None), // Accumulator mode
+                0x46 => self.lsr(&Some(AdressingMode::ZeroPage)),
+                0x56 => self.lsr(&Some(AdressingMode::ZeroPageX)),
+                0x4E => self.lsr(&Some(AdressingMode::Absolute)),
+                0x5E => self.lsr(&Some(AdressingMode::AbsoluteX)),
+
+                0x0A => self.asl(&None), // Accumulator mode
+                0x06 => self.asl(&Some(AdressingMode::ZeroPage)),
+                0x16 => self.asl(&Some(AdressingMode::ZeroPageX)),
+                0x0E => self.asl(&Some(AdressingMode::Absolute)),
+                0x1E => self.asl(&Some(AdressingMode::AbsoluteX)),
+
+                0x6A => self.ror(&None), // Accumulator mode
+                0x66 => self.ror(&Some(AdressingMode::ZeroPage)),
+                0x76 => self.ror(&Some(AdressingMode::ZeroPageX)),
+                0x6E => self.ror(&Some(AdressingMode::Absolute)),
+                0x7E => self.ror(&Some(AdressingMode::AbsoluteX)),
+
+                0x2A => self.rol(&None), // Accumulator mode
+                0x26 => self.rol(&Some(AdressingMode::ZeroPage)),
+                0x36 => self.rol(&Some(AdressingMode::ZeroPageX)),
+                0x2E => self.rol(&Some(AdressingMode::Absolute)),
+                0x3E => self.rol(&Some(AdressingMode::AbsoluteX)),
+
+                0x29 => self.and(&AdressingMode::Immediate),
+                0x25 => self.and(&AdressingMode::ZeroPage),
+                0x35 => self.and(&AdressingMode::ZeroPageX),
+                0x2D => self.and(&AdressingMode::Absolute),
+                0x3D => self.and(&AdressingMode::AbsoluteX),
+                0x39 => self.and(&AdressingMode::AbsoluteY),
+                0x21 => self.and(&AdressingMode::IndirectX),
+                0x31 => self.and(&AdressingMode::IndirectY),
+
+                0x49 => self.eor(&AdressingMode::Immediate),
+                0x45 => self.eor(&AdressingMode::ZeroPage),
+                0x55 => self.eor(&AdressingMode::ZeroPageX),
+                0x4D => self.eor(&AdressingMode::Absolute),
+                0x5D => self.eor(&AdressingMode::AbsoluteX),
+                0x59 => self.eor(&AdressingMode::AbsoluteY),
+                0x41 => self.eor(&AdressingMode::IndirectX),
+                0x51 => self.eor(&AdressingMode::IndirectY),
+
+                0x09 => self.ora(&AdressingMode::Immediate),
+                0x05 => self.ora(&AdressingMode::ZeroPage),
+                0x15 => self.ora(&AdressingMode::ZeroPageX),
+                0x0D => self.ora(&AdressingMode::Absolute),
+                0x1D => self.ora(&AdressingMode::AbsoluteX),
+                0x19 => self.ora(&AdressingMode::AbsoluteY),
+                0x01 => self.ora(&AdressingMode::IndirectX),
+                0x11 => self.ora(&AdressingMode::IndirectY),
 
                 0xC9 => self.cmp(&AdressingMode::Immediate),
                 0xC5 => self.cmp(&AdressingMode::ZeroPage),
@@ -392,6 +442,134 @@ impl CPU {
         self.program_counter = new_pc;
     }
 
+    fn rol(&mut self, mode: &Option<AdressingMode>) {
+        let value: u8;
+        let new_pc: u16;
+
+        // TODO: there is probably a nicer way of handling this?
+        if mode.is_some() {
+            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
+            value = self.read_byte(addr);
+            new_pc = pc;
+        } else {
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        }
+
+        if CPU::nth_bit(value, 7) {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        let result = (value << 1) | (value >> (CPU::BITS_IN_BYTE - 1));
+        self.update_zero_and_negative_flags(result);
+        self.program_counter = new_pc;
+    }
+
+    fn ror(&mut self, mode: &Option<AdressingMode>) {
+        let value: u8;
+        let new_pc: u16;
+
+        // TODO: there is probably a nicer way of handling this?
+        if mode.is_some() {
+            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
+            value = self.read_byte(addr);
+            new_pc = pc;
+        } else {
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        }
+
+        if CPU::nth_bit(value, 0) {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        let result = (value >> 1) | (value << (CPU::BITS_IN_BYTE - 1));
+        self.update_zero_and_negative_flags(result);
+        self.program_counter = new_pc;
+    }
+
+    fn asl(&mut self, mode: &Option<AdressingMode>) {
+        let value: u8;
+        let new_pc: u16;
+
+        // TODO: there is probably a nicer way of handling this?
+        if mode.is_some() {
+            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
+            value = self.read_byte(addr);
+            new_pc = pc;
+        } else {
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        }
+
+        if CPU::nth_bit(value, 7) {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        let result = value << 1;
+        self.update_zero_and_negative_flags(result);
+        self.program_counter = new_pc;
+    }
+
+    fn lsr(&mut self, mode: &Option<AdressingMode>) {
+        let value: u8;
+        let new_pc: u16;
+
+        // TODO: there is probably a nicer way of handling this?
+        if mode.is_some() {
+            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
+            value = self.read_byte(addr);
+            new_pc = pc;
+        } else {
+            value = self.accumulator;
+            // This is a hack to only consume 1 byte
+            new_pc = self.consume_params(&AdressingMode::Immediate)
+        }
+
+        if CPU::nth_bit(value, 0) {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+
+        let result = value >> 1;
+        self.update_zero_and_negative_flags(result);
+        self.program_counter = new_pc;
+    }
+
+    fn and(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(&mode);
+        let value = self.read_byte(addr);
+
+        self.accumulator &= value;
+        self.update_zero_and_negative_flags(self.accumulator);
+        self.program_counter = new_pc;
+    }
+
+    fn eor(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(&mode);
+        let value = self.read_byte(addr);
+
+        self.accumulator ^= value;
+        self.update_zero_and_negative_flags(self.accumulator);
+        self.program_counter = new_pc;
+    }
+
+    fn ora(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(&mode);
+        let value = self.read_byte(addr);
+
+        self.accumulator |= value;
+        self.update_zero_and_negative_flags(self.accumulator);
+        self.program_counter = new_pc;
+    }
+
     fn dex(&mut self) {
         self.register_x = self.register_x.wrapping_sub(1);
         self.update_zero_and_negative_flags(self.register_x)
@@ -445,6 +623,14 @@ mod test {
     test_zero_flag!(test_lda_zero_flag, 0xa9, accumulator);
     test_zero_flag!(test_ldx_zero_flag, 0xa2, register_x);
     test_zero_flag!(test_tax_zero_flag, 0xaa, register_x);
+
+    #[test]
+    fn test_inx() {
+        let mut cpu = CPU::new();
+        cpu.load_program(vec![0xA2, 0x05, 0xE8, 0x00]);
+        cpu.run();
+        assert_eq!(cpu.register_x, 0x06);
+    }
 
     #[test]
     fn test_tax() {
