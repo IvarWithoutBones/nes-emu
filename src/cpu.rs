@@ -1,7 +1,6 @@
 use bitflags::bitflags;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
-#[allow(dead_code)]
 enum AdressingMode {
     Immediate,
     NoneAddressing,
@@ -607,80 +606,160 @@ impl CPU {
 mod test {
     use super::*;
 
-    macro_rules! test_zero_flag {
-        ($test_name:ident, $test_op:expr, $register:ident) => {
+    macro_rules! test_cpu {
+        ($test_name: ident, $asm:expr, $callback:expr) => {
             #[test]
             fn $test_name() {
                 let mut cpu = CPU::new();
-                cpu.load_program(vec![$test_op, 0x00, 0x00]);
+                let mut assembly = $asm.to_vec();
+                assembly.push(0x00); // Terminating instruction
+                cpu.load_program(assembly);
                 cpu.run();
-                assert_eq!(cpu.$register, 0x00);
-                assert!(cpu.status.contains(CpuFlags::ZERO));
+                $callback(cpu);
+            }
+        };
+
+        ($test_name: ident, $asm:expr, $dont_execute:expr, $callback:expr) => {
+            #[test]
+            fn $test_name() {
+                let mut cpu = CPU::new();
+                let mut assembly = $asm.to_vec();
+                assembly.push(0x00); // Terminating instruction
+                cpu.load_program(assembly);
+                $callback(&mut cpu);
+            }
+        };
+
+        ($test_name: ident, $callback:expr) => {
+            #[test]
+            fn $test_name() {
+                let mut cpu = CPU::new();
+                $callback(&mut cpu);
             }
         };
     }
 
-    test_zero_flag!(test_lda_zero_flag, 0xa9, accumulator);
-    test_zero_flag!(test_ldx_zero_flag, 0xa2, register_x);
-    test_zero_flag!(test_tax_zero_flag, 0xaa, register_x);
+    test_cpu!(
+        test_lda_from_memory,
+        [0xa5, 0x10 /* LDA, 0x10 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x10, 0x55);
+            cpu.run();
+            assert_eq!(cpu.accumulator, 0x55);
+        }
+    );
 
-    #[test]
-    fn test_inx() {
-        let mut cpu = CPU::new();
-        cpu.load_program(vec![0xA2, 0x05, 0xE8, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.register_x, 0x06);
-    }
+    test_cpu!(
+        test_inx,
+        [0xa2, 5, /* LDX, 5 */ 0xe8 /* INX */],
+        |cpu: CPU| {
+            assert_eq!(cpu.register_x, 6);
+        }
+    );
 
-    #[test]
-    fn test_tax() {
-        let mut cpu = CPU::new();
-        cpu.load_program(vec![0xA9, 0x42, 0xaa, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.register_x, 0x42)
-    }
+    test_cpu!(
+        test_tax,
+        [0xa9, 5, /* LDA, 5 */ 0xaa /* TAX */],
+        |cpu: CPU| {
+            assert_eq!(cpu.register_x, 5);
+        }
+    );
 
-    #[test]
-    fn test_lda_immediate() {
-        let mut cpu = CPU::new();
-        cpu.load_program(vec![0xA9, 0x42, 0x00]);
+    test_cpu!(
+        test_inx_overflow,
+        [0xa2, 0xff, /* LDX, 5 */ 0xe8, /* TAX */ 0xe8 /* TAX */],
+        |cpu: CPU| { assert_eq!(cpu.register_x, 1) }
+    );
+
+    test_cpu!(
+        test_multiple_ops,
+        [0xa9, 0xc0, /* LDA, 0xc0 */ 0xaa, /* TAX */ 0xe8 /* TAX */],
+        |cpu: CPU| { assert_eq!(cpu.register_x, 0xc1) }
+    );
+
+    test_cpu!(
+        test_dec,
+        [0xc6, 0x10 /* DEC, 0x10 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x10, 0x1);
+            cpu.run();
+            assert_eq!(cpu.read_byte(0x10), 0);
+            assert!(cpu.status.contains(CpuFlags::ZERO));
+        }
+    );
+
+    test_cpu!(test_dey, [0x88 /* DEY */], true, |cpu: &mut CPU| {
+        cpu.register_y = 10;
         cpu.run();
-        assert_eq!(cpu.accumulator, 0x42);
+        assert_eq!(cpu.register_y, 9);
+    });
+
+    test_cpu!(test_lda_immediate, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
+        assert_eq!(cpu.accumulator, 5);
         assert_eq!(cpu.status, CpuFlags::empty());
-    }
+    });
 
-    #[test]
-    fn test_ldx_immediate() {
-        let mut cpu = CPU::new();
-        cpu.load_program(vec![0xA2, 0x32, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.register_x, 0x32);
+    test_cpu!(test_ldy_immediate, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
+        assert_eq!(cpu.register_y, 5);
         assert_eq!(cpu.status, CpuFlags::empty());
-    }
+    });
+
+    test_cpu!(test_ldx_immediate, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
+        assert_eq!(cpu.register_x, 5);
+        assert_eq!(cpu.status, CpuFlags::empty());
+    });
+
+    test_cpu!(test_cpx_immediate, [0xe0, 5 /* CPX, 5 */], |cpu: CPU| {
+        // TODO: This doesnt feel right
+        assert_eq!(cpu.status, CpuFlags::empty());
+    });
+
+    test_cpu!(
+        test_cpx_immediate_zero,
+        [0xe0, 0 /* CPX, 0 */],
+        |cpu: CPU| {
+            assert!(cpu.status.contains(CpuFlags::ZERO));
+        }
+    );
+
+    test_cpu!(test_read_write_word, |cpu: &mut CPU| {
+        cpu.write_word(0x10, 0x1234);
+        assert_eq!(cpu.read_word(0x10), 0x1234);
+        cpu.write_word(0xfff, 0x5422);
+        assert_eq!(cpu.read_word(0xfff), 0x5422);
+    });
+
+    test_cpu!(test_read_write_byte, |cpu: &mut CPU| {
+        cpu.write_byte(0x10, 0x12);
+        assert_eq!(cpu.read_byte(0x10), 0x12);
+    });
+
+    test_cpu!(test_update_negative, |cpu: &mut CPU| {
+        cpu.update_negative_flag(0b1000_0000);
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        cpu.update_negative_flag(0b0111_1111);
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+    });
+
+    test_cpu!(test_update_zero, |cpu: &mut CPU| {
+        cpu.update_zero_and_negative_flags(0);
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+        cpu.update_zero_and_negative_flags(1);
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+    });
 
     #[test]
-    fn test_5_ops_working_together() {
-        let mut cpu = CPU::new();
-        cpu.load_program(vec![0xa9, 0xc0, 0xaa, 0xe8, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.register_x, 0xc1)
-    }
-
-    #[test]
-    fn test_inx_overflow() {
-        let mut cpu = CPU::new();
-        cpu.register_x = 0xff;
-        cpu.load_program(vec![0xe8, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.register_x, 1)
-    }
-
-    #[test]
-    fn test_lda_from_memory() {
-        let mut cpu = CPU::new();
-        cpu.write_byte(0x10, 0x55);
-        cpu.load_program(vec![0xa5, 0x10, 0x00]);
-        cpu.run();
-        assert_eq!(cpu.accumulator, 0x55);
+    fn test_nth_bit() {
+        let value = 0b1010_1010;
+        assert_eq!(CPU::nth_bit(value, 0), false);
+        assert_eq!(CPU::nth_bit(value, 1), true);
+        assert_eq!(CPU::nth_bit(value, 2), false);
+        assert_eq!(CPU::nth_bit(value, 3), true);
+        assert_eq!(CPU::nth_bit(value, 4), false);
+        assert_eq!(CPU::nth_bit(value, 5), true);
+        assert_eq!(CPU::nth_bit(value, 6), false);
+        assert_eq!(CPU::nth_bit(value, 7), true);
     }
 }
