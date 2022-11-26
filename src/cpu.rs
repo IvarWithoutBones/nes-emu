@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
+#[derive(Debug)]
 enum AdressingMode {
     Immediate,
 
@@ -156,11 +157,16 @@ impl CPU {
             match opcode {
                 0xEA => continue, // NOP
                 0x00 => return,   // BRK
-
                 0xAA => self.tax(),
                 0xB8 => self.clv(),
+
+                0x78 => self.sei(),
                 0x58 => self.cli(),
+
+                0xf8 => self.sed(),
                 0xD8 => self.cld(),
+
+                0x38 => self.sec(),
                 0x18 => self.clc(),
 
                 0xCA => self.dex(),
@@ -230,22 +236,22 @@ impl CPU {
                 0x01 => self.ora(&AdressingMode::IndirectX),
                 0x11 => self.ora(&AdressingMode::IndirectY),
 
-                0xC9 => self.compare(&AdressingMode::Immediate, self.accumulator),
-                0xC5 => self.compare(&AdressingMode::ZeroPage, self.accumulator),
-                0xD5 => self.compare(&AdressingMode::ZeroPageX, self.accumulator),
-                0xCD => self.compare(&AdressingMode::Absolute, self.accumulator),
-                0xDD => self.compare(&AdressingMode::AbsoluteX, self.accumulator),
-                0xD9 => self.compare(&AdressingMode::AbsoluteY, self.accumulator),
-                0xC1 => self.compare(&AdressingMode::IndirectX, self.accumulator),
-                0xD1 => self.compare(&AdressingMode::IndirectY, self.accumulator),
+                0xC9 => self.cmp(&AdressingMode::Immediate, self.accumulator),
+                0xC5 => self.cmp(&AdressingMode::ZeroPage, self.accumulator),
+                0xD5 => self.cmp(&AdressingMode::ZeroPageX, self.accumulator),
+                0xCD => self.cmp(&AdressingMode::Absolute, self.accumulator),
+                0xDD => self.cmp(&AdressingMode::AbsoluteX, self.accumulator),
+                0xD9 => self.cmp(&AdressingMode::AbsoluteY, self.accumulator),
+                0xC1 => self.cmp(&AdressingMode::IndirectX, self.accumulator),
+                0xD1 => self.cmp(&AdressingMode::IndirectY, self.accumulator),
 
-                0xE0 => self.compare(&AdressingMode::Immediate, self.register_x),
-                0xE4 => self.compare(&AdressingMode::ZeroPage, self.register_x),
-                0xEC => self.compare(&AdressingMode::Absolute, self.register_x),
+                0xE0 => self.cmp(&AdressingMode::Immediate, self.register_x),
+                0xE4 => self.cmp(&AdressingMode::ZeroPage, self.register_x),
+                0xEC => self.cmp(&AdressingMode::Absolute, self.register_x),
 
-                0xC0 => self.compare(&AdressingMode::Immediate, self.register_y),
-                0xC4 => self.compare(&AdressingMode::ZeroPage, self.register_y),
-                0xCC => self.compare(&AdressingMode::Absolute, self.register_y),
+                0xC0 => self.cmp(&AdressingMode::Immediate, self.register_y),
+                0xC4 => self.cmp(&AdressingMode::ZeroPage, self.register_y),
+                0xCC => self.cmp(&AdressingMode::Absolute, self.register_y),
 
                 0xA9 => self.lda(&AdressingMode::Immediate),
                 0xA5 => self.lda(&AdressingMode::ZeroPage),
@@ -267,6 +273,9 @@ impl CPU {
                 0xB4 => self.ldy(&AdressingMode::ZeroPageX),
                 0xAC => self.ldy(&AdressingMode::Absolute),
                 0xBC => self.ldy(&AdressingMode::AbsoluteX),
+
+                0x4c => self.jmp(&Some(AdressingMode::Absolute)),
+                0x6c => self.jmp(&None),
 
                 _ => todo!("opcode {:02x} not implemented", opcode),
             }
@@ -311,7 +320,27 @@ impl CPU {
       Opcodes
     */
 
-    fn compare(&mut self, mode: &AdressingMode, compare_with: u8) {
+    fn jmp(&mut self, mode: &Option<AdressingMode>) {
+        let mut address: u16 = self.read_word(self.program_counter);
+
+        // Indirect mode, not used by any other opcode
+        if mode.is_none() {
+            address = if address & 0x00FF == 0x00FF {
+                // An original 6502 has does not correctly fetch the target address if the indirect vector falls on a
+                // page boundary (e.g. $xxFF). In this case fetches the LSB from $xxFF as expected but takes the MSB from $xx00.
+                u16::from_le_bytes([
+                    self.read_byte(address as u16),
+                    self.read_byte((address as u16) & 0xFF00),
+                ])
+            } else {
+                self.read_word(address)
+            };
+        }
+
+        self.program_counter = address;
+    }
+
+    fn cmp(&mut self, mode: &AdressingMode, compare_with: u8) {
         let (addr, new_pc) = self.param_from_adressing_mode(mode);
         let value = self.read_byte(addr);
 
@@ -498,6 +527,18 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_x)
     }
 
+    fn sed(&mut self) {
+        self.status.insert(CpuFlags::DECIMAL);
+    }
+
+    fn sec(&mut self) {
+        self.status.insert(CpuFlags::CARRY);
+    }
+
+    fn sei(&mut self) {
+        self.status.insert(CpuFlags::IRQ);
+    }
+
     fn clv(&mut self) {
         self.status.remove(CpuFlags::OVERFLOW);
     }
@@ -518,6 +559,19 @@ impl CPU {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_nth_bit() {
+        let value = 0b1010_1010;
+        assert_eq!(CPU::nth_bit(value, 0), false);
+        assert_eq!(CPU::nth_bit(value, 1), true);
+        assert_eq!(CPU::nth_bit(value, 2), false);
+        assert_eq!(CPU::nth_bit(value, 3), true);
+        assert_eq!(CPU::nth_bit(value, 4), false);
+        assert_eq!(CPU::nth_bit(value, 5), true);
+        assert_eq!(CPU::nth_bit(value, 6), false);
+        assert_eq!(CPU::nth_bit(value, 7), true);
+    }
 
     macro_rules! test_cpu {
         ($test_name: ident, $asm:expr, $callback:expr) => {
@@ -559,6 +613,21 @@ mod test {
         assert_eq!(cpu.program_counter, 0);
         assert_eq!(cpu.status, CpuFlags::empty());
     });
+
+    test_cpu!(test_jmp, [0x4C, 0x00, 0xff /* JMP 0xff00 */], |cpu: CPU| {
+        assert_eq!(cpu.program_counter, 0xff01); // Plus one because of BRK instruction decoding
+    });
+
+    test_cpu!(
+        test_jmp_indirect,
+        [0x6C, 0x00, 0xff /* JMP 0xff00 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0xff00, 0x00);
+            cpu.run();
+            assert_eq!(cpu.program_counter, 0x0001); // Plus one because of BRK instruction decoding
+        }
+    );
 
     test_cpu!(
         test_and,
@@ -736,6 +805,14 @@ mod test {
         assert!(!cpu.status.contains(CpuFlags::ZERO));
     });
 
+    macro_rules! test_status_set {
+        ($test_name: ident, $asm: expr, $flag: expr) => {
+            test_cpu!($test_name, [$asm], |cpu: CPU| {
+                assert!(cpu.status.contains($flag));
+            });
+        };
+    }
+
     macro_rules! test_status_clear {
         ($test_name: ident, $asm: expr, $flag: expr) => {
             test_cpu!($test_name, [$asm], true, |cpu: &mut CPU| {
@@ -747,20 +824,13 @@ mod test {
     }
 
     test_status_clear!(test_clv, 0xb8, CpuFlags::OVERFLOW);
-    test_status_clear!(test_cli, 0x58, CpuFlags::IRQ);
-    test_status_clear!(test_cld, 0xd8, CpuFlags::DECIMAL);
+
+    test_status_set!(test_sec, 0x38, CpuFlags::CARRY);
     test_status_clear!(test_clc, 0x18, CpuFlags::CARRY);
 
-    #[test]
-    fn test_nth_bit() {
-        let value = 0b1010_1010;
-        assert_eq!(CPU::nth_bit(value, 0), false);
-        assert_eq!(CPU::nth_bit(value, 1), true);
-        assert_eq!(CPU::nth_bit(value, 2), false);
-        assert_eq!(CPU::nth_bit(value, 3), true);
-        assert_eq!(CPU::nth_bit(value, 4), false);
-        assert_eq!(CPU::nth_bit(value, 5), true);
-        assert_eq!(CPU::nth_bit(value, 6), false);
-        assert_eq!(CPU::nth_bit(value, 7), true);
-    }
+    test_status_clear!(test_cld, 0xd8, CpuFlags::DECIMAL);
+    test_status_set!(test_sed, 0xf8, CpuFlags::DECIMAL);
+
+    test_status_set!(test_sei, 0x78, CpuFlags::IRQ);
+    test_status_clear!(test_cli, 0x58, CpuFlags::IRQ);
 }
