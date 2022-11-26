@@ -3,7 +3,6 @@ use bitflags::bitflags;
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 enum AdressingMode {
     Immediate,
-    NoneAddressing,
 
     IndirectX,
     IndirectY,
@@ -58,7 +57,6 @@ pub struct CPU {
 impl CPU {
     const RAM_SIZE: usize = 0xFFFF;
     const PROGRAM_ROM_START: u16 = 0x8000;
-    const INITIAL_PROGRAM_COUNTER: u16 = 0xFFFC;
     const BITS_IN_BYTE: u8 = 8;
 
     pub fn new() -> CPU {
@@ -73,23 +71,23 @@ impl CPU {
     }
 
     pub fn load_program(&mut self, program: Vec<u8>) {
-        self.program_counter = CPU::PROGRAM_ROM_START;
+        self.reset();
         self.memory[CPU::PROGRAM_ROM_START as usize
             ..(CPU::PROGRAM_ROM_START + program.len() as u16) as usize]
             .copy_from_slice(&program[..]);
-        self.write_word(CPU::INITIAL_PROGRAM_COUNTER, CPU::PROGRAM_ROM_START);
     }
 
     fn reset(&mut self) {
         self.status = CpuFlags::empty();
         self.accumulator = 0;
         self.register_x = 0;
-        self.program_counter = self.read_word(CPU::INITIAL_PROGRAM_COUNTER);
+        self.register_y = 0;
+        self.program_counter = CPU::PROGRAM_ROM_START;
+        self.memory = [0; CPU::RAM_SIZE];
     }
 
     fn param_from_adressing_mode(&self, mode: &AdressingMode) -> (u16, u16) {
         let addr = match mode {
-            AdressingMode::NoneAddressing => panic!("no addressing mode, this should never occur"),
             AdressingMode::Immediate => self.program_counter,
             AdressingMode::Absolute => self.read_word(self.program_counter),
             AdressingMode::ZeroPage => self.read_byte(self.program_counter) as u16,
@@ -137,8 +135,6 @@ impl CPU {
 
     fn consume_params(&self, mode: &AdressingMode) -> u16 {
         match mode {
-            AdressingMode::NoneAddressing => panic!("no addressing mode, this should never occur"),
-
             AdressingMode::Immediate
             | AdressingMode::IndirectX
             | AdressingMode::IndirectY
@@ -153,8 +149,6 @@ impl CPU {
     }
 
     pub fn run(&mut self) {
-        self.reset();
-
         loop {
             let opcode = self.read_byte(self.program_counter);
             self.program_counter += 1;
@@ -236,22 +230,22 @@ impl CPU {
                 0x01 => self.ora(&AdressingMode::IndirectX),
                 0x11 => self.ora(&AdressingMode::IndirectY),
 
-                0xC9 => self.cmp(&AdressingMode::Immediate),
-                0xC5 => self.cmp(&AdressingMode::ZeroPage),
-                0xD5 => self.cmp(&AdressingMode::ZeroPageX),
-                0xCD => self.cmp(&AdressingMode::Absolute),
-                0xDD => self.cmp(&AdressingMode::AbsoluteX),
-                0xD9 => self.cmp(&AdressingMode::AbsoluteY),
-                0xC1 => self.cmp(&AdressingMode::IndirectX),
-                0xD1 => self.cmp(&AdressingMode::IndirectY),
+                0xC9 => self.compare(&AdressingMode::Immediate, self.accumulator),
+                0xC5 => self.compare(&AdressingMode::ZeroPage, self.accumulator),
+                0xD5 => self.compare(&AdressingMode::ZeroPageX, self.accumulator),
+                0xCD => self.compare(&AdressingMode::Absolute, self.accumulator),
+                0xDD => self.compare(&AdressingMode::AbsoluteX, self.accumulator),
+                0xD9 => self.compare(&AdressingMode::AbsoluteY, self.accumulator),
+                0xC1 => self.compare(&AdressingMode::IndirectX, self.accumulator),
+                0xD1 => self.compare(&AdressingMode::IndirectY, self.accumulator),
 
-                0xE0 => self.cpx(&AdressingMode::Immediate),
-                0xE4 => self.cpx(&AdressingMode::ZeroPage),
-                0xEC => self.cpx(&AdressingMode::Absolute),
+                0xE0 => self.compare(&AdressingMode::Immediate, self.register_x),
+                0xE4 => self.compare(&AdressingMode::ZeroPage, self.register_x),
+                0xEC => self.compare(&AdressingMode::Absolute, self.register_x),
 
-                0xC0 => self.cpy(&AdressingMode::Immediate),
-                0xC4 => self.cpy(&AdressingMode::ZeroPage),
-                0xCC => self.cpy(&AdressingMode::Absolute),
+                0xC0 => self.compare(&AdressingMode::Immediate, self.register_y),
+                0xC4 => self.compare(&AdressingMode::ZeroPage, self.register_y),
+                0xCC => self.compare(&AdressingMode::Absolute, self.register_y),
 
                 0xA9 => self.lda(&AdressingMode::Immediate),
                 0xA5 => self.lda(&AdressingMode::ZeroPage),
@@ -300,89 +294,30 @@ impl CPU {
     }
 
     fn write_word(&mut self, address: u16, data: u16) {
-        self.write_byte(address, (data & 0xff) as u8);
-        self.write_byte(address + 1, (data >> 8) as u8);
+        self.memory[address as usize..(address + 2) as usize]
+            .copy_from_slice(u16::to_le_bytes(data).as_ref());
     }
 
     fn update_negative_flag(&mut self, value: u8) {
-        if CPU::nth_bit(value, 7) {
-            self.status.insert(CpuFlags::NEGATIVE);
-        } else {
-            self.status.remove(CpuFlags::NEGATIVE);
-        }
+        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
     }
 
     fn update_zero_and_negative_flags(&mut self, value: u8) {
         self.update_negative_flag(value);
-
-        if value == 0 {
-            self.status.insert(CpuFlags::ZERO);
-        } else {
-            self.status.remove(CpuFlags::ZERO);
-        }
+        self.status.set(CpuFlags::ZERO, value == 0);
     }
 
     /*
       Opcodes
     */
 
-    fn cmp(&mut self, mode: &AdressingMode) {
+    fn compare(&mut self, mode: &AdressingMode, compare_with: u8) {
         let (addr, new_pc) = self.param_from_adressing_mode(mode);
         let value = self.read_byte(addr);
 
-        if self.accumulator == value {
-            self.status.insert(CpuFlags::ZERO);
-        } else {
-            self.status.remove(CpuFlags::ZERO);
-        }
-
-        if self.accumulator >= value {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        self.update_negative_flag(value);
-        self.program_counter = new_pc;
-    }
-
-    fn cpx(&mut self, mode: &AdressingMode) {
-        let (addr, new_pc) = self.param_from_adressing_mode(mode);
-        let value = self.read_byte(addr);
-
-        if self.register_x == value {
-            self.status.insert(CpuFlags::ZERO);
-        } else {
-            self.status.remove(CpuFlags::ZERO);
-        }
-
-        if self.register_x >= value {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        self.update_negative_flag(value);
-        self.program_counter = new_pc;
-    }
-
-    fn cpy(&mut self, mode: &AdressingMode) {
-        let (addr, new_pc) = self.param_from_adressing_mode(mode);
-        let value = self.read_byte(addr);
-
-        if self.register_y == value {
-            self.status.insert(CpuFlags::ZERO);
-        } else {
-            self.status.remove(CpuFlags::ZERO);
-        }
-
-        if self.register_y >= value {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        self.update_negative_flag(value);
+        self.status.set(CpuFlags::CARRY, compare_with >= value);
+        // Subtract so that we set the ZERO flag if the values are equal
+        self.update_zero_and_negative_flags(compare_with.wrapping_sub(value));
         self.program_counter = new_pc;
     }
 
@@ -442,103 +377,82 @@ impl CPU {
     }
 
     fn rol(&mut self, mode: &Option<AdressingMode>) {
-        let value: u8;
+        let mut value: u8;
         let new_pc: u16;
 
-        // TODO: there is probably a nicer way of handling this?
-        if mode.is_some() {
+        if mode.is_none() {
+            // Accumulator mode is implied
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        } else {
             let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
             value = self.read_byte(addr);
             new_pc = pc;
-        } else {
-            value = self.accumulator;
-            new_pc = self.program_counter;
         }
 
-        if CPU::nth_bit(value, 7) {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        let result = (value << 1) | (value >> (CPU::BITS_IN_BYTE - 1));
-        self.update_zero_and_negative_flags(result);
+        self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        value = (value << 1) | (value >> (CPU::BITS_IN_BYTE - 1));
+        self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
     fn ror(&mut self, mode: &Option<AdressingMode>) {
-        let value: u8;
+        let mut value: u8;
         let new_pc: u16;
 
-        // TODO: there is probably a nicer way of handling this?
-        if mode.is_some() {
+        if mode.is_none() {
+            // Accumulator mode is implied
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        } else {
             let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
             value = self.read_byte(addr);
             new_pc = pc;
-        } else {
-            value = self.accumulator;
-            new_pc = self.program_counter;
         }
 
-        if CPU::nth_bit(value, 0) {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        let result = (value >> 1) | (value << (CPU::BITS_IN_BYTE - 1));
-        self.update_zero_and_negative_flags(result);
+        self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        value = (value >> 1) | (value << (CPU::BITS_IN_BYTE - 1));
+        self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
     fn asl(&mut self, mode: &Option<AdressingMode>) {
-        let value: u8;
+        let mut value: u8;
         let new_pc: u16;
 
-        // TODO: there is probably a nicer way of handling this?
-        if mode.is_some() {
+        if mode.is_none() {
+            // Accumulator mode is implied
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        } else {
             let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
             value = self.read_byte(addr);
             new_pc = pc;
-        } else {
-            value = self.accumulator;
-            new_pc = self.program_counter;
         }
 
-        if CPU::nth_bit(value, 7) {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        let result = value << 1;
-        self.update_zero_and_negative_flags(result);
+        self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        value <<= 1;
+        self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
     fn lsr(&mut self, mode: &Option<AdressingMode>) {
-        let value: u8;
+        let mut value: u8;
         let new_pc: u16;
 
-        // TODO: there is probably a nicer way of handling this?
-        if mode.is_some() {
+        if mode.is_none() {
+            // Accumulator mode is implied
+            value = self.accumulator;
+            new_pc = self.program_counter;
+        } else {
             let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
             value = self.read_byte(addr);
             new_pc = pc;
-        } else {
-            value = self.accumulator;
-            // This is a hack to only consume 1 byte
-            new_pc = self.consume_params(&AdressingMode::Immediate)
         }
 
-        if CPU::nth_bit(value, 0) {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
-
-        let result = value >> 1;
-        self.update_zero_and_negative_flags(result);
+        self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        value >>= 1;
+        self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
@@ -597,7 +511,6 @@ impl CPU {
     }
 
     fn cld(&mut self) {
-        // TODO: bootup sequence related stuff?
         self.status.remove(CpuFlags::DECIMAL);
     }
 }
@@ -639,38 +552,77 @@ mod test {
         };
     }
 
+    test_cpu!(test_cpu_init, |cpu: &mut CPU| {
+        assert_eq!(cpu.accumulator, 0);
+        assert_eq!(cpu.register_x, 0);
+        assert_eq!(cpu.register_y, 0);
+        assert_eq!(cpu.program_counter, 0);
+        assert_eq!(cpu.status, CpuFlags::empty());
+    });
+
     test_cpu!(
-        test_lda_from_memory,
-        [0xa5, 0x10 /* LDA, 0x10 */],
+        test_and,
+        [0x29, 234 /*  AND, 234 */],
         true,
         |cpu: &mut CPU| {
-            cpu.write_byte(0x10, 0x55);
+            cpu.accumulator = 0b1010;
             cpu.run();
-            assert_eq!(cpu.accumulator, 0x55);
+            assert_eq!(cpu.accumulator, 0b1010 & 234);
         }
     );
 
     test_cpu!(
-        test_inx,
-        [0xa2, 5, /* LDX, 5 */ 0xe8 /* INX */],
-        |cpu: CPU| {
-            assert_eq!(cpu.register_x, 6);
+        test_ora,
+        [0x09, 123 /* ORA, 123 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.accumulator = 0b1010;
+            cpu.run();
+            assert_eq!(cpu.accumulator, 0b1010 | 123);
         }
     );
 
     test_cpu!(
-        test_tax,
-        [0xa9, 5, /* LDA, 5 */ 0xaa /* TAX */],
-        |cpu: CPU| {
-            assert_eq!(cpu.register_x, 5);
+        test_eor,
+        [0x49, 123 /* EOR, 123 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.accumulator = 0b1010;
+            cpu.run();
+            assert_eq!(cpu.accumulator, 0b1010 ^ 123);
         }
     );
 
+    test_cpu!(test_inx, [0xe8 /* INX */], true, |cpu: &mut CPU| {
+        cpu.register_x = 5;
+        cpu.run();
+        assert_eq!(cpu.register_x, 6);
+    });
+
+    test_cpu!(test_iny, [0xc8 /* INY */], true, |cpu: &mut CPU| {
+        cpu.register_y = 0xff;
+        cpu.run();
+        assert_eq!(cpu.register_y, 0);
+    });
+
     test_cpu!(
-        test_inx_overflow,
-        [0xa2, 0xff, /* LDX, 5 */ 0xe8, /* TAX */ 0xe8 /* TAX */],
-        |cpu: CPU| { assert_eq!(cpu.register_x, 1) }
+        test_inc,
+        [0xe6, 0x10 /* INC, 0x10 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x10, 1);
+            cpu.run();
+            assert_eq!(cpu.read_byte(0x10), 2);
+            assert!(!cpu.status.contains(CpuFlags::ZERO));
+            assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        }
     );
+
+    test_cpu!(test_tax, [0xaa /* TAX */], true, |cpu: &mut CPU| {
+        cpu.accumulator = 5;
+        cpu.run();
+        assert_eq!(cpu.register_x, 5);
+    });
 
     test_cpu!(
         test_multiple_ops,
@@ -696,33 +648,67 @@ mod test {
         assert_eq!(cpu.register_y, 9);
     });
 
-    test_cpu!(test_lda_immediate, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
+    test_cpu!(test_dex, [0xCA /* DEX */], true, |cpu: &mut CPU| {
+        cpu.register_x = 0;
+        cpu.run();
+        assert_eq!(cpu.register_x, 0xff);
+    });
+
+    test_cpu!(test_cpx, [0xe0, 10 /* CPX, 10 */], true, |cpu: &mut CPU| {
+        cpu.register_x = 10;
+        cpu.run();
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+    });
+
+    test_cpu!(test_cpy, [0xc0, 10 /* CPY, 10 */], true, |cpu: &mut CPU| {
+        cpu.register_y = 9;
+        cpu.run();
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+    });
+
+    test_cpu!(
+        test_cmp,
+        [0xc5, 0x56 /* CMP, 0x56 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x56, 10);
+            cpu.accumulator = 10;
+            cpu.run();
+            assert!(cpu.status.contains(CpuFlags::CARRY));
+            assert!(cpu.status.contains(CpuFlags::ZERO));
+            assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        }
+    );
+
+    test_cpu!(test_lda, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
         assert_eq!(cpu.accumulator, 5);
         assert_eq!(cpu.status, CpuFlags::empty());
     });
 
-    test_cpu!(test_ldy_immediate, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
+    test_cpu!(
+        test_lda_from_memory,
+        [0xa5, 0x55 /* LDA, 0x55 */],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x55, 10);
+            cpu.run();
+            assert_eq!(cpu.accumulator, 10);
+        }
+    );
+
+    test_cpu!(test_ldy, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_y, 5);
         assert_eq!(cpu.status, CpuFlags::empty());
     });
 
-    test_cpu!(test_ldx_immediate, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
+    test_cpu!(test_ldx, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_x, 5);
         assert_eq!(cpu.status, CpuFlags::empty());
     });
-
-    test_cpu!(test_cpx_immediate, [0xe0, 5 /* CPX, 5 */], |cpu: CPU| {
-        // TODO: This doesnt feel right
-        assert_eq!(cpu.status, CpuFlags::empty());
-    });
-
-    test_cpu!(
-        test_cpx_immediate_zero,
-        [0xe0, 0 /* CPX, 0 */],
-        |cpu: CPU| {
-            assert!(cpu.status.contains(CpuFlags::ZERO));
-        }
-    );
 
     test_cpu!(test_read_write_word, |cpu: &mut CPU| {
         cpu.write_word(0x10, 0x1234);
@@ -749,6 +735,21 @@ mod test {
         cpu.update_zero_and_negative_flags(1);
         assert!(!cpu.status.contains(CpuFlags::ZERO));
     });
+
+    macro_rules! test_status_clear {
+        ($test_name: ident, $asm: expr, $flag: expr) => {
+            test_cpu!($test_name, [$asm], true, |cpu: &mut CPU| {
+                cpu.status.insert($flag);
+                cpu.run();
+                assert!(!cpu.status.contains($flag));
+            });
+        };
+    }
+
+    test_status_clear!(test_clv, 0xb8, CpuFlags::OVERFLOW);
+    test_status_clear!(test_cli, 0x58, CpuFlags::IRQ);
+    test_status_clear!(test_cld, 0xd8, CpuFlags::DECIMAL);
+    test_status_clear!(test_clc, 0x18, CpuFlags::CARRY);
 
     #[test]
     fn test_nth_bit() {
