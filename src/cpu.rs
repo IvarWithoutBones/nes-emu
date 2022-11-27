@@ -58,7 +58,6 @@ pub struct CPU {
 impl CPU {
     const RAM_SIZE: usize = 0xFFFF;
     const PROGRAM_ROM_START: u16 = 0x8000;
-    const BITS_IN_BYTE: u8 = 8;
 
     pub fn new() -> CPU {
         CPU {
@@ -145,139 +144,6 @@ impl CPU {
 
             AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => {
                 self.program_counter + 2
-            }
-        }
-    }
-
-    pub fn run(&mut self) {
-        loop {
-            let opcode = self.read_byte(self.program_counter);
-            self.program_counter += 1;
-
-            match opcode {
-                0xEA => continue, // NOP
-                0x00 => return,   // BRK
-                0xAA => self.tax(),
-                0xB8 => self.clv(),
-
-                0x78 => self.sei(),
-                0x58 => self.cli(),
-
-                0xf8 => self.sed(),
-                0xD8 => self.cld(),
-
-                0x38 => self.sec(),
-                0x18 => self.clc(),
-
-                0xCA => self.dex(),
-                0x88 => self.dey(),
-
-                0xC6 => self.dec(&AdressingMode::ZeroPage),
-                0xD6 => self.dec(&AdressingMode::ZeroPageX),
-                0xCE => self.dec(&AdressingMode::Absolute),
-                0xDE => self.dec(&AdressingMode::AbsoluteX),
-
-                0xE8 => self.inx(),
-                0xC8 => self.iny(),
-
-                0xE6 => self.inc(&AdressingMode::ZeroPage),
-                0xF6 => self.inc(&AdressingMode::ZeroPageX),
-                0xEE => self.inc(&AdressingMode::Absolute),
-                0xFE => self.inc(&AdressingMode::AbsoluteX),
-
-                0x4A => self.lsr(&None), // Accumulator mode
-                0x46 => self.lsr(&Some(AdressingMode::ZeroPage)),
-                0x56 => self.lsr(&Some(AdressingMode::ZeroPageX)),
-                0x4E => self.lsr(&Some(AdressingMode::Absolute)),
-                0x5E => self.lsr(&Some(AdressingMode::AbsoluteX)),
-
-                0x0A => self.asl(&None), // Accumulator mode
-                0x06 => self.asl(&Some(AdressingMode::ZeroPage)),
-                0x16 => self.asl(&Some(AdressingMode::ZeroPageX)),
-                0x0E => self.asl(&Some(AdressingMode::Absolute)),
-                0x1E => self.asl(&Some(AdressingMode::AbsoluteX)),
-
-                0x6A => self.ror(&None), // Accumulator mode
-                0x66 => self.ror(&Some(AdressingMode::ZeroPage)),
-                0x76 => self.ror(&Some(AdressingMode::ZeroPageX)),
-                0x6E => self.ror(&Some(AdressingMode::Absolute)),
-                0x7E => self.ror(&Some(AdressingMode::AbsoluteX)),
-
-                0x2A => self.rol(&None), // Accumulator mode
-                0x26 => self.rol(&Some(AdressingMode::ZeroPage)),
-                0x36 => self.rol(&Some(AdressingMode::ZeroPageX)),
-                0x2E => self.rol(&Some(AdressingMode::Absolute)),
-                0x3E => self.rol(&Some(AdressingMode::AbsoluteX)),
-
-                0x29 => self.and(&AdressingMode::Immediate),
-                0x25 => self.and(&AdressingMode::ZeroPage),
-                0x35 => self.and(&AdressingMode::ZeroPageX),
-                0x2D => self.and(&AdressingMode::Absolute),
-                0x3D => self.and(&AdressingMode::AbsoluteX),
-                0x39 => self.and(&AdressingMode::AbsoluteY),
-                0x21 => self.and(&AdressingMode::IndirectX),
-                0x31 => self.and(&AdressingMode::IndirectY),
-
-                0x49 => self.eor(&AdressingMode::Immediate),
-                0x45 => self.eor(&AdressingMode::ZeroPage),
-                0x55 => self.eor(&AdressingMode::ZeroPageX),
-                0x4D => self.eor(&AdressingMode::Absolute),
-                0x5D => self.eor(&AdressingMode::AbsoluteX),
-                0x59 => self.eor(&AdressingMode::AbsoluteY),
-                0x41 => self.eor(&AdressingMode::IndirectX),
-                0x51 => self.eor(&AdressingMode::IndirectY),
-
-                0x09 => self.ora(&AdressingMode::Immediate),
-                0x05 => self.ora(&AdressingMode::ZeroPage),
-                0x15 => self.ora(&AdressingMode::ZeroPageX),
-                0x0D => self.ora(&AdressingMode::Absolute),
-                0x1D => self.ora(&AdressingMode::AbsoluteX),
-                0x19 => self.ora(&AdressingMode::AbsoluteY),
-                0x01 => self.ora(&AdressingMode::IndirectX),
-                0x11 => self.ora(&AdressingMode::IndirectY),
-
-                0xC9 => self.cmp(&AdressingMode::Immediate, self.accumulator),
-                0xC5 => self.cmp(&AdressingMode::ZeroPage, self.accumulator),
-                0xD5 => self.cmp(&AdressingMode::ZeroPageX, self.accumulator),
-                0xCD => self.cmp(&AdressingMode::Absolute, self.accumulator),
-                0xDD => self.cmp(&AdressingMode::AbsoluteX, self.accumulator),
-                0xD9 => self.cmp(&AdressingMode::AbsoluteY, self.accumulator),
-                0xC1 => self.cmp(&AdressingMode::IndirectX, self.accumulator),
-                0xD1 => self.cmp(&AdressingMode::IndirectY, self.accumulator),
-
-                0xE0 => self.cmp(&AdressingMode::Immediate, self.register_x),
-                0xE4 => self.cmp(&AdressingMode::ZeroPage, self.register_x),
-                0xEC => self.cmp(&AdressingMode::Absolute, self.register_x),
-
-                0xC0 => self.cmp(&AdressingMode::Immediate, self.register_y),
-                0xC4 => self.cmp(&AdressingMode::ZeroPage, self.register_y),
-                0xCC => self.cmp(&AdressingMode::Absolute, self.register_y),
-
-                0xA9 => self.lda(&AdressingMode::Immediate),
-                0xA5 => self.lda(&AdressingMode::ZeroPage),
-                0xB5 => self.lda(&AdressingMode::ZeroPageX),
-                0xAD => self.lda(&AdressingMode::Absolute),
-                0xBD => self.lda(&AdressingMode::AbsoluteX),
-                0xB9 => self.lda(&AdressingMode::AbsoluteY),
-                0xA1 => self.lda(&AdressingMode::IndirectX),
-                0xB1 => self.lda(&AdressingMode::IndirectY),
-
-                0xA2 => self.ldx(&AdressingMode::Immediate),
-                0xA6 => self.ldx(&AdressingMode::ZeroPage),
-                0xB6 => self.ldx(&AdressingMode::ZeroPageY),
-                0xAE => self.ldx(&AdressingMode::Absolute),
-                0xBE => self.ldx(&AdressingMode::AbsoluteY),
-
-                0xA0 => self.ldy(&AdressingMode::Immediate),
-                0xA4 => self.ldy(&AdressingMode::ZeroPage),
-                0xB4 => self.ldy(&AdressingMode::ZeroPageX),
-                0xAC => self.ldy(&AdressingMode::Absolute),
-                0xBC => self.ldy(&AdressingMode::AbsoluteX),
-
-                0x4c => self.jmp(&Some(AdressingMode::Absolute)),
-                0x6c => self.jmp(&None),
-
-                _ => todo!("opcode {:02x} not implemented", opcode),
             }
         }
     }
@@ -405,82 +271,78 @@ impl CPU {
         self.program_counter = new_pc;
     }
 
-    fn rol(&mut self, mode: &Option<AdressingMode>) {
-        let mut value: u8;
-        let new_pc: u16;
+    fn rol_accumulator(&mut self) {
+        self.status
+            .set(CpuFlags::CARRY, CPU::nth_bit(self.accumulator, 7));
+        self.accumulator = self.accumulator.rotate_left(1);
+        self.update_zero_and_negative_flags(self.accumulator);
+    }
 
-        if mode.is_none() {
-            // Accumulator mode is implied
-            value = self.accumulator;
-            new_pc = self.program_counter;
-        } else {
-            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
-            value = self.read_byte(addr);
-            new_pc = pc;
-        }
+    fn rol(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        let mut value = self.read_byte(addr);
 
         self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
-        value = (value << 1) | (value >> (CPU::BITS_IN_BYTE - 1));
+        value = value.rotate_left(1);
+        self.write_byte(addr, value);
+
         self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
-    fn ror(&mut self, mode: &Option<AdressingMode>) {
-        let mut value: u8;
-        let new_pc: u16;
+    fn ror_accumulator(&mut self) {
+        self.status
+            .set(CpuFlags::CARRY, CPU::nth_bit(self.accumulator, 0));
+        self.accumulator = self.accumulator.rotate_right(1);
+        self.update_zero_and_negative_flags(self.accumulator);
+    }
 
-        if mode.is_none() {
-            // Accumulator mode is implied
-            value = self.accumulator;
-            new_pc = self.program_counter;
-        } else {
-            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
-            value = self.read_byte(addr);
-            new_pc = pc;
-        }
+    fn ror(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        let mut value = self.read_byte(addr);
 
         self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
-        value = (value >> 1) | (value << (CPU::BITS_IN_BYTE - 1));
+        value = value.rotate_right(1);
+        self.write_byte(addr, value);
+
         self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
-    fn asl(&mut self, mode: &Option<AdressingMode>) {
-        let mut value: u8;
-        let new_pc: u16;
+    fn asl_accumulator(&mut self) {
+        self.status
+            .set(CpuFlags::CARRY, CPU::nth_bit(self.accumulator, 7));
+        self.accumulator <<= 1;
+        self.update_zero_and_negative_flags(self.accumulator);
+    }
 
-        if mode.is_none() {
-            // Accumulator mode is implied
-            value = self.accumulator;
-            new_pc = self.program_counter;
-        } else {
-            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
-            value = self.read_byte(addr);
-            new_pc = pc;
-        }
+    fn asl(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        let mut value = self.read_byte(addr);
 
         self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
         value <<= 1;
+        self.write_byte(addr, value);
+
         self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
 
-    fn lsr(&mut self, mode: &Option<AdressingMode>) {
-        let mut value: u8;
-        let new_pc: u16;
+    fn lsr_accumulator(&mut self) {
+        self.status
+            .set(CpuFlags::CARRY, CPU::nth_bit(self.accumulator, 0));
+        self.accumulator >>= 1;
+        self.update_zero_and_negative_flags(self.accumulator);
+    }
 
-        if mode.is_none() {
-            // Accumulator mode is implied
-            value = self.accumulator;
-            new_pc = self.program_counter;
-        } else {
-            let (addr, pc) = self.param_from_adressing_mode(&mode.as_ref().unwrap());
-            value = self.read_byte(addr);
-            new_pc = pc;
-        }
+    fn lsr(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        let mut value = self.read_byte(addr);
 
         self.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
         value >>= 1;
+        self.write_byte(addr, value);
+
         self.update_zero_and_negative_flags(value);
         self.program_counter = new_pc;
     }
@@ -553,6 +415,139 @@ impl CPU {
 
     fn cld(&mut self) {
         self.status.remove(CpuFlags::DECIMAL);
+    }
+
+    pub fn run(&mut self) {
+        loop {
+            let opcode = self.read_byte(self.program_counter);
+            self.program_counter += 1;
+
+            match opcode {
+                0xEA => continue, // NOP
+                0x00 => return,   // BRK
+                0xAA => self.tax(),
+                0xB8 => self.clv(),
+
+                0x78 => self.sei(),
+                0x58 => self.cli(),
+
+                0xf8 => self.sed(),
+                0xD8 => self.cld(),
+
+                0x38 => self.sec(),
+                0x18 => self.clc(),
+
+                0xCA => self.dex(),
+                0x88 => self.dey(),
+
+                0xC6 => self.dec(&AdressingMode::ZeroPage),
+                0xD6 => self.dec(&AdressingMode::ZeroPageX),
+                0xCE => self.dec(&AdressingMode::Absolute),
+                0xDE => self.dec(&AdressingMode::AbsoluteX),
+
+                0xE8 => self.inx(),
+                0xC8 => self.iny(),
+
+                0xE6 => self.inc(&AdressingMode::ZeroPage),
+                0xF6 => self.inc(&AdressingMode::ZeroPageX),
+                0xEE => self.inc(&AdressingMode::Absolute),
+                0xFE => self.inc(&AdressingMode::AbsoluteX),
+
+                0x4A => self.lsr_accumulator(),
+                0x46 => self.lsr(&AdressingMode::ZeroPage),
+                0x56 => self.lsr(&AdressingMode::ZeroPageX),
+                0x4E => self.lsr(&AdressingMode::Absolute),
+                0x5E => self.lsr(&AdressingMode::AbsoluteX),
+
+                0x0A => self.asl_accumulator(),
+                0x06 => self.asl(&AdressingMode::ZeroPage),
+                0x16 => self.asl(&AdressingMode::ZeroPageX),
+                0x0E => self.asl(&AdressingMode::Absolute),
+                0x1E => self.asl(&AdressingMode::AbsoluteX),
+
+                0x6A => self.ror_accumulator(),
+                0x66 => self.ror(&AdressingMode::ZeroPage),
+                0x76 => self.ror(&AdressingMode::ZeroPageX),
+                0x6E => self.ror(&AdressingMode::Absolute),
+                0x7E => self.ror(&AdressingMode::AbsoluteX),
+
+                0x2A => self.rol_accumulator(),
+                0x26 => self.rol(&AdressingMode::ZeroPage),
+                0x36 => self.rol(&AdressingMode::ZeroPageX),
+                0x2E => self.rol(&AdressingMode::Absolute),
+                0x3E => self.rol(&AdressingMode::AbsoluteX),
+
+                0x29 => self.and(&AdressingMode::Immediate),
+                0x25 => self.and(&AdressingMode::ZeroPage),
+                0x35 => self.and(&AdressingMode::ZeroPageX),
+                0x2D => self.and(&AdressingMode::Absolute),
+                0x3D => self.and(&AdressingMode::AbsoluteX),
+                0x39 => self.and(&AdressingMode::AbsoluteY),
+                0x21 => self.and(&AdressingMode::IndirectX),
+                0x31 => self.and(&AdressingMode::IndirectY),
+
+                0x49 => self.eor(&AdressingMode::Immediate),
+                0x45 => self.eor(&AdressingMode::ZeroPage),
+                0x55 => self.eor(&AdressingMode::ZeroPageX),
+                0x4D => self.eor(&AdressingMode::Absolute),
+                0x5D => self.eor(&AdressingMode::AbsoluteX),
+                0x59 => self.eor(&AdressingMode::AbsoluteY),
+                0x41 => self.eor(&AdressingMode::IndirectX),
+                0x51 => self.eor(&AdressingMode::IndirectY),
+
+                0x09 => self.ora(&AdressingMode::Immediate),
+                0x05 => self.ora(&AdressingMode::ZeroPage),
+                0x15 => self.ora(&AdressingMode::ZeroPageX),
+                0x0D => self.ora(&AdressingMode::Absolute),
+                0x1D => self.ora(&AdressingMode::AbsoluteX),
+                0x19 => self.ora(&AdressingMode::AbsoluteY),
+                0x01 => self.ora(&AdressingMode::IndirectX),
+                0x11 => self.ora(&AdressingMode::IndirectY),
+
+                0xC9 => self.cmp(&AdressingMode::Immediate, self.accumulator),
+                0xC5 => self.cmp(&AdressingMode::ZeroPage, self.accumulator),
+                0xD5 => self.cmp(&AdressingMode::ZeroPageX, self.accumulator),
+                0xCD => self.cmp(&AdressingMode::Absolute, self.accumulator),
+                0xDD => self.cmp(&AdressingMode::AbsoluteX, self.accumulator),
+                0xD9 => self.cmp(&AdressingMode::AbsoluteY, self.accumulator),
+                0xC1 => self.cmp(&AdressingMode::IndirectX, self.accumulator),
+                0xD1 => self.cmp(&AdressingMode::IndirectY, self.accumulator),
+
+                0xE0 => self.cmp(&AdressingMode::Immediate, self.register_x),
+                0xE4 => self.cmp(&AdressingMode::ZeroPage, self.register_x),
+                0xEC => self.cmp(&AdressingMode::Absolute, self.register_x),
+
+                0xC0 => self.cmp(&AdressingMode::Immediate, self.register_y),
+                0xC4 => self.cmp(&AdressingMode::ZeroPage, self.register_y),
+                0xCC => self.cmp(&AdressingMode::Absolute, self.register_y),
+
+                0xA9 => self.lda(&AdressingMode::Immediate),
+                0xA5 => self.lda(&AdressingMode::ZeroPage),
+                0xB5 => self.lda(&AdressingMode::ZeroPageX),
+                0xAD => self.lda(&AdressingMode::Absolute),
+                0xBD => self.lda(&AdressingMode::AbsoluteX),
+                0xB9 => self.lda(&AdressingMode::AbsoluteY),
+                0xA1 => self.lda(&AdressingMode::IndirectX),
+                0xB1 => self.lda(&AdressingMode::IndirectY),
+
+                0xA2 => self.ldx(&AdressingMode::Immediate),
+                0xA6 => self.ldx(&AdressingMode::ZeroPage),
+                0xB6 => self.ldx(&AdressingMode::ZeroPageY),
+                0xAE => self.ldx(&AdressingMode::Absolute),
+                0xBE => self.ldx(&AdressingMode::AbsoluteY),
+
+                0xA0 => self.ldy(&AdressingMode::Immediate),
+                0xA4 => self.ldy(&AdressingMode::ZeroPage),
+                0xB4 => self.ldy(&AdressingMode::ZeroPageX),
+                0xAC => self.ldy(&AdressingMode::Absolute),
+                0xBC => self.ldy(&AdressingMode::AbsoluteX),
+
+                0x4c => self.jmp(&Some(AdressingMode::Absolute)),
+                0x6c => self.jmp(&None),
+
+                _ => todo!("opcode {:02x} not implemented", opcode),
+            }
+        }
     }
 }
 
