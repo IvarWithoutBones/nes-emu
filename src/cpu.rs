@@ -32,7 +32,7 @@ bitflags! {
         +--------- Negative
     */
     #[rustfmt::skip]
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, Clone, PartialEq)]
     struct CpuFlags: u8 {
         const CARRY =    0b0000_0001;
         const ZERO =     0b0000_0010;
@@ -51,6 +51,7 @@ pub struct CPU {
     register_x: u8,
     register_y: u8,
     program_counter: u16,
+    stack_pointer: u8,
     status: CpuFlags,
     memory: [u8; CPU::RAM_SIZE],
 }
@@ -58,10 +59,13 @@ pub struct CPU {
 impl CPU {
     const RAM_SIZE: usize = 0xFFFF;
     const PROGRAM_ROM_START: u16 = 0x8000;
+    const STACK_OFFSET: u16 = 0x0100;
+    const STACK_RESET: u8 = 0xFD;
 
     pub fn new() -> CPU {
         CPU {
             program_counter: 0,
+            stack_pointer: CPU::STACK_RESET,
             status: CpuFlags::empty(),
             memory: [0; CPU::RAM_SIZE],
             accumulator: 0,
@@ -84,6 +88,60 @@ impl CPU {
         self.register_y = 0;
         self.program_counter = CPU::PROGRAM_ROM_START;
         self.memory = [0; CPU::RAM_SIZE];
+    }
+
+    /*
+      Helpers
+    */
+
+    const fn nth_bit(value: u8, n: u8) -> bool {
+        value & (1 << n) != 0
+    }
+
+    fn read_byte(&self, address: u16) -> u8 {
+        self.memory[address as usize]
+    }
+
+    fn write_byte(&mut self, address: u16, data: u8) {
+        self.memory[address as usize] = data
+    }
+
+    fn read_word(&self, address: u16) -> u16 {
+        u16::from_le_bytes([self.read_byte(address), self.read_byte(address + 1)])
+    }
+
+    fn write_word(&mut self, address: u16, data: u16) {
+        self.memory[address as usize..(address + 2) as usize]
+            .copy_from_slice(u16::to_le_bytes(data).as_ref());
+    }
+
+    fn stack_push_byte(&mut self, data: u8) {
+        self.write_byte(CPU::STACK_OFFSET + self.stack_pointer as u16, data);
+        self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+    }
+
+    fn stack_pop_byte(&mut self) -> u8 {
+        self.stack_pointer = self.stack_pointer.wrapping_add(1);
+        self.read_byte(CPU::STACK_OFFSET + self.stack_pointer as u16)
+    }
+
+    fn stack_push_word(&mut self, data: u16) {
+        let bytes = u16::to_le_bytes(data);
+        self.stack_push_byte(bytes[0]);
+        self.stack_push_byte(bytes[1]);
+    }
+
+    fn stack_pop_word(&mut self) -> u16 {
+        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()])
+    }
+
+    fn update_negative_flag(&mut self, value: u8) {
+        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
+    }
+
+    fn update_zero_and_negative_flags(&mut self, value: u8) {
+        self.update_negative_flag(value);
+        self.status.set(CpuFlags::ZERO, value == 0);
     }
 
     fn param_from_adressing_mode(&self, mode: &AdressingMode) -> (u16, u16) {
@@ -149,42 +207,80 @@ impl CPU {
     }
 
     /*
-      Helpers
-    */
-
-    const fn nth_bit(value: u8, n: u8) -> bool {
-        value & (1 << n) != 0
-    }
-
-    fn read_byte(&self, address: u16) -> u8 {
-        self.memory[address as usize]
-    }
-
-    fn write_byte(&mut self, address: u16, data: u8) {
-        self.memory[address as usize] = data
-    }
-
-    fn read_word(&self, address: u16) -> u16 {
-        u16::from_le_bytes([self.read_byte(address), self.read_byte(address + 1)])
-    }
-
-    fn write_word(&mut self, address: u16, data: u16) {
-        self.memory[address as usize..(address + 2) as usize]
-            .copy_from_slice(u16::to_le_bytes(data).as_ref());
-    }
-
-    fn update_negative_flag(&mut self, value: u8) {
-        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
-    }
-
-    fn update_zero_and_negative_flags(&mut self, value: u8) {
-        self.update_negative_flag(value);
-        self.status.set(CpuFlags::ZERO, value == 0);
-    }
-
-    /*
       Opcodes
     */
+
+    fn branch(&mut self, condition: bool) {
+        if condition {
+            let offset = self.read_byte(self.program_counter) as i8;
+            self.program_counter = self.program_counter.wrapping_add(offset as u16);
+        }
+        self.program_counter += 1; // TODO: this isnt the cleanest
+    }
+
+    fn pha(&mut self) {
+        self.stack_push_byte(self.accumulator);
+    }
+
+    fn pla(&mut self) {
+        self.accumulator = self.stack_pop_byte();
+        self.update_zero_and_negative_flags(self.accumulator);
+    }
+
+    fn php(&mut self) {
+        let mut status = self.status.clone();
+        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
+        status.insert(CpuFlags::BREAK);
+        status.insert(CpuFlags::BREAK2);
+        self.stack_push_byte(status.bits());
+    }
+
+    fn plp(&mut self) {
+        self.status = CpuFlags::from_bits_truncate(self.stack_pop_byte());
+        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
+        self.status.remove(CpuFlags::BREAK);
+        self.status.insert(CpuFlags::BREAK2);
+    }
+
+    fn jsr(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        self.stack_push_word(new_pc - 1);
+        self.program_counter = addr;
+    }
+
+    fn rts(&mut self) {
+        self.program_counter = self.stack_pop_word() + 1;
+    }
+
+    fn sta(&mut self, mode: &AdressingMode) {
+        let (addr, next_pc) = self.param_from_adressing_mode(mode);
+        self.write_byte(addr, self.accumulator);
+        self.program_counter = next_pc;
+    }
+
+    fn stx(&mut self, mode: &AdressingMode) {
+        let (addr, next_pc) = self.param_from_adressing_mode(mode);
+        self.write_byte(addr, self.register_x);
+        self.program_counter = next_pc;
+    }
+
+    fn sty(&mut self, mode: &AdressingMode) {
+        let (addr, next_pc) = self.param_from_adressing_mode(mode);
+        self.write_byte(addr, self.register_y);
+        self.program_counter = next_pc;
+    }
+
+    fn bit(&mut self, mode: &AdressingMode) {
+        let (addr, new_pc) = self.param_from_adressing_mode(mode);
+        let value = self.read_byte(addr);
+
+        self.status
+            .set(CpuFlags::ZERO, (self.accumulator & value) == 0);
+        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
+        self.status.set(CpuFlags::OVERFLOW, CPU::nth_bit(value, 6));
+
+        self.program_counter = new_pc;
+    }
 
     fn jmp(&mut self, mode: &Option<AdressingMode>) {
         let mut address: u16 = self.read_word(self.program_counter);
@@ -389,6 +485,21 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_x)
     }
 
+    fn txa(&mut self) {
+        self.accumulator = self.register_x;
+        self.update_zero_and_negative_flags(self.accumulator)
+    }
+
+    fn tya(&mut self) {
+        self.accumulator = self.register_y;
+        self.update_zero_and_negative_flags(self.accumulator)
+    }
+
+    fn tay(&mut self) {
+        self.register_y = self.accumulator;
+        self.update_zero_and_negative_flags(self.register_y)
+    }
+
     fn sed(&mut self) {
         self.status.insert(CpuFlags::DECIMAL);
     }
@@ -425,7 +536,31 @@ impl CPU {
             match opcode {
                 0xEA => continue, // NOP
                 0x00 => return,   // BRK
+
+                0xB0 => self.branch(self.status.contains(CpuFlags::CARRY)),
+                0x90 => self.branch(!self.status.contains(CpuFlags::CARRY)),
+
+                0xF0 => self.branch(self.status.contains(CpuFlags::ZERO)),
+                0xD0 => self.branch(!self.status.contains(CpuFlags::ZERO)),
+
+                0x30 => self.branch(self.status.contains(CpuFlags::NEGATIVE)),
+                0x10 => self.branch(!self.status.contains(CpuFlags::NEGATIVE)),
+
+                0x70 => self.branch(self.status.contains(CpuFlags::OVERFLOW)),
+                0x50 => self.branch(!self.status.contains(CpuFlags::OVERFLOW)),
+
+                0x08 => self.php(),
+                0x28 => self.plp(),
+
+                0x48 => self.pha(),
+                0x68 => self.pla(),
+
                 0xAA => self.tax(),
+                0x9A => self.txa(),
+
+                0xA8 => self.tay(),
+                0x98 => self.tya(),
+
                 0xB8 => self.clv(),
 
                 0x78 => self.sei(),
@@ -439,6 +574,9 @@ impl CPU {
 
                 0xCA => self.dex(),
                 0x88 => self.dey(),
+
+                0x20 => self.jsr(&AdressingMode::Absolute),
+                0x60 => self.rts(),
 
                 0xC6 => self.dec(&AdressingMode::ZeroPage),
                 0xD6 => self.dec(&AdressingMode::ZeroPageX),
@@ -530,11 +668,23 @@ impl CPU {
                 0xA1 => self.lda(&AdressingMode::IndirectX),
                 0xB1 => self.lda(&AdressingMode::IndirectY),
 
+                0x85 => self.sta(&AdressingMode::ZeroPage),
+                0x95 => self.sta(&AdressingMode::ZeroPageX),
+                0x8D => self.sta(&AdressingMode::Absolute),
+                0x9D => self.sta(&AdressingMode::AbsoluteX),
+                0x99 => self.sta(&AdressingMode::AbsoluteY),
+                0x81 => self.sta(&AdressingMode::IndirectX),
+                0x91 => self.sta(&AdressingMode::IndirectY),
+
                 0xA2 => self.ldx(&AdressingMode::Immediate),
                 0xA6 => self.ldx(&AdressingMode::ZeroPage),
                 0xB6 => self.ldx(&AdressingMode::ZeroPageY),
                 0xAE => self.ldx(&AdressingMode::Absolute),
                 0xBE => self.ldx(&AdressingMode::AbsoluteY),
+
+                0x86 => self.stx(&AdressingMode::ZeroPage),
+                0x96 => self.stx(&AdressingMode::ZeroPageY),
+                0x8E => self.stx(&AdressingMode::Absolute),
 
                 0xA0 => self.ldy(&AdressingMode::Immediate),
                 0xA4 => self.ldy(&AdressingMode::ZeroPage),
@@ -542,8 +692,15 @@ impl CPU {
                 0xAC => self.ldy(&AdressingMode::Absolute),
                 0xBC => self.ldy(&AdressingMode::AbsoluteX),
 
+                0x84 => self.sty(&AdressingMode::ZeroPage),
+                0x94 => self.sty(&AdressingMode::ZeroPageX),
+                0x8C => self.sty(&AdressingMode::Absolute),
+
                 0x4c => self.jmp(&Some(AdressingMode::Absolute)),
                 0x6c => self.jmp(&None),
+
+                0x24 => self.bit(&AdressingMode::ZeroPage),
+                0x2C => self.bit(&AdressingMode::Absolute),
 
                 _ => todo!("opcode {:02x} not implemented", opcode),
             }
