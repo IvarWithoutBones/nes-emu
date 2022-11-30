@@ -58,7 +58,7 @@ pub struct CPU {
 
 impl CPU {
     const RAM_SIZE: usize = 0xFFFF;
-    const PROGRAM_ROM_START: u16 = 0x8000;
+    const PROGRAM_ROM_START: usize = 0x8000;
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
 
@@ -76,9 +76,8 @@ impl CPU {
 
     pub fn load_program(&mut self, program: Vec<u8>) {
         self.reset();
-        self.memory[CPU::PROGRAM_ROM_START as usize
-            ..(CPU::PROGRAM_ROM_START + program.len() as u16) as usize]
-            .copy_from_slice(&program[..]);
+        self.memory[CPU::PROGRAM_ROM_START..(CPU::PROGRAM_ROM_START + program.len())]
+            .copy_from_slice(&program);
     }
 
     fn reset(&mut self) {
@@ -86,7 +85,7 @@ impl CPU {
         self.accumulator = 0;
         self.register_x = 0;
         self.register_y = 0;
-        self.program_counter = CPU::PROGRAM_ROM_START;
+        self.program_counter = CPU::PROGRAM_ROM_START as u16;
         self.memory = [0; CPU::RAM_SIZE];
     }
 
