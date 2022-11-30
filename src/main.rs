@@ -1,9 +1,18 @@
+mod bus;
 mod cartridge;
 mod cpu;
 
+use cartridge::Cartridge;
+use cpu::CPU;
+use std::env;
+
 fn main() {
-    let rom = cartridge::Cartridge::from_path("roms/snake.nes").unwrap();
-    let mut cpu = cpu::CPU::new();
-    cpu.load_program(rom.program_rom);
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        panic!("No ROM specified");
+    }
+
+    let mut cpu = CPU::new(Cartridge::from_path(&args[1]).unwrap());
+    cpu.reset();
     cpu.run();
 }

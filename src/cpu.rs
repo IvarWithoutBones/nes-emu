@@ -1,3 +1,5 @@
+use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
+use crate::Cartridge;
 use bitflags::bitflags;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
@@ -53,40 +55,42 @@ pub struct CPU {
     program_counter: u16,
     stack_pointer: u8,
     status: CpuFlags,
-    memory: [u8; CPU::RAM_SIZE],
+    pub bus: Bus,
+}
+
+impl Memory for CPU {
+    fn read_byte(&self, address: u16) -> u8 {
+        self.bus.read_byte(address)
+    }
+
+    fn write_byte(&mut self, address: u16, data: u8) {
+        self.bus.write_byte(address, data)
+    }
 }
 
 impl CPU {
-    const RAM_SIZE: usize = 0xFFFF;
-    const PROGRAM_ROM_START: usize = 0x8000;
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
 
-    pub fn new() -> CPU {
+    pub fn new(cartridge: Cartridge) -> CPU {
         CPU {
-            program_counter: 0,
+            program_counter: PROGRAM_ROM_START,
             stack_pointer: CPU::STACK_RESET,
             status: CpuFlags::empty(),
-            memory: [0; CPU::RAM_SIZE],
+            bus: Bus::new(cartridge),
             accumulator: 0,
             register_x: 0,
             register_y: 0,
         }
     }
 
-    pub fn load_program(&mut self, program: Vec<u8>) {
-        self.reset();
-        self.memory[CPU::PROGRAM_ROM_START..(CPU::PROGRAM_ROM_START + program.len())]
-            .copy_from_slice(&program);
-    }
-
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.status = CpuFlags::empty();
+        self.stack_pointer = CPU::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
         self.register_y = 0;
-        self.program_counter = CPU::PROGRAM_ROM_START as u16;
-        self.memory = [0; CPU::RAM_SIZE];
+        self.program_counter = PROGRAM_ROM_START as u16;
     }
 
     /*
@@ -95,24 +99,6 @@ impl CPU {
 
     const fn nth_bit(value: u8, n: u8) -> bool {
         value & (1 << n) != 0
-    }
-
-    fn read_byte(&self, address: u16) -> u8 {
-        self.memory[address as usize]
-    }
-
-    fn write_byte(&mut self, address: u16, data: u8) {
-        self.memory[address as usize] = data
-    }
-
-    fn read_word(&self, address: u16) -> u16 {
-        u16::from_le_bytes([self.read_byte(address), self.read_byte(address + 1)])
-    }
-
-    #[allow(dead_code)] // Used in unit tests
-    fn write_word(&mut self, address: u16, data: u16) {
-        self.memory[address as usize..(address + 2) as usize]
-            .copy_from_slice(u16::to_le_bytes(data).as_ref());
     }
 
     fn stack_push_byte(&mut self, data: u8) {
@@ -574,6 +560,18 @@ impl CPU {
             let opcode = self.read_byte(self.program_counter);
             self.program_counter += 1;
 
+            // TODO: Better logging
+            println!(
+                "{:#06x}: {:#02x} ({:04x})\tA: {:02x} X: {:02x} Y: {:02x} SP: {:02x}",
+                self.program_counter,
+                opcode,
+                self.read_word(self.program_counter),
+                self.accumulator,
+                self.register_x,
+                self.register_y,
+                self.stack_pointer
+            );
+
             match opcode {
                 0xEA => continue, // NOP
                 0x00 => return,   // BRK
@@ -795,10 +793,8 @@ mod test {
         ($test_name: ident, $asm:expr, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let mut cpu = CPU::new();
-                let mut assembly = $asm.to_vec();
-                assembly.push(0x00); // Terminating instruction
-                cpu.load_program(assembly);
+                let cart = Cartridge::new($asm.to_vec()).unwrap();
+                let mut cpu = CPU::new(cart);
                 cpu.run();
                 $callback(cpu);
             }
@@ -807,10 +803,8 @@ mod test {
         ($test_name: ident, $asm:expr, $dont_execute:expr, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let mut cpu = CPU::new();
-                let mut assembly = $asm.to_vec();
-                assembly.push(0x00); // Terminating instruction
-                cpu.load_program(assembly);
+                let cart = Cartridge::new($asm.to_vec()).unwrap();
+                let mut cpu = CPU::new(cart);
                 $callback(&mut cpu);
             }
         };
@@ -818,7 +812,8 @@ mod test {
         ($test_name: ident, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let mut cpu = CPU::new();
+                let cart = Cartridge::new([0].to_vec()).unwrap();
+                let mut cpu = CPU::new(cart);
                 $callback(&mut cpu);
             }
         };
@@ -828,20 +823,20 @@ mod test {
         assert_eq!(cpu.accumulator, 0);
         assert_eq!(cpu.register_x, 0);
         assert_eq!(cpu.register_y, 0);
-        assert_eq!(cpu.program_counter, 0);
+        assert_eq!(cpu.program_counter, PROGRAM_ROM_START);
         assert_eq!(cpu.status, CpuFlags::empty());
     });
 
-    test_cpu!(test_jmp, [0x4C, 0x00, 0xff /* JMP 0xff00 */], |cpu: CPU| {
-        assert_eq!(cpu.program_counter, 0xff01); // Plus one because of BRK instruction decoding
+    test_cpu!(test_jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
+        assert_eq!(cpu.program_counter, 0x0011); // Plus one because of BRK instruction decoding
     });
 
     test_cpu!(
         test_jmp_indirect,
-        [0x6C, 0x00, 0xff /* JMP 0xff00 */],
+        [0x6C, 0xff, 0x00 /* JMP 0x00ff */],
         true,
         |cpu: &mut CPU| {
-            cpu.write_byte(0xff00, 0x00);
+            cpu.write_byte(0x00ff, 0x00);
             cpu.run();
             assert_eq!(cpu.program_counter, 0x0001); // Plus one because of BRK instruction decoding
         }

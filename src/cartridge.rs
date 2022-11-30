@@ -31,6 +31,8 @@ pub struct Header {
     mapper: u8,
 }
 
+const HEADER_SIZE: usize = 16;
+
 impl Header {
     fn new(data: [u8; 16]) -> Result<Self, String> {
         if std::str::from_utf8(&data[0..=3]) != Ok("NES\x1a") {
@@ -60,6 +62,25 @@ impl Header {
             mapper,
         })
     }
+
+    /// Dummy header for testing
+    const fn generate() -> [u8; HEADER_SIZE] {
+        [
+            b'N', b'E', b'S', 0x1a, // NES\x1a
+            1,    // Program ROM pages
+            0,    // Character ROM pages
+            0,    // Flags 6
+            0,    // Flags 7
+            0,    // Flags 8
+            0,    // Flags 9
+            0,    // Flags 10
+            0,    // Zero
+            0,    // Zero
+            0,    // Zero
+            0,    // Zero
+            0,    // Zero
+        ]
+    }
 }
 
 pub struct Cartridge {
@@ -71,14 +92,10 @@ pub struct Cartridge {
 impl Cartridge {
     const PROGRAM_ROM_PAGE_SIZE: usize = 16 * 1024;
     const CHARACTER_ROM_PAGE_SIZE: usize = 8 * 1024;
-    const HEADER_SIZE: usize = 16;
     const TRAINER_SIZE: usize = 512;
 
-    pub fn from_path(path: &str) -> Result<Cartridge, String> {
-        let data =
-            std::fs::read(path).expect(format!("Unable to read file from path {}", path).as_str());
-
-        let header = Header::new(data[..Self::HEADER_SIZE].try_into().unwrap());
+    fn from_bytes(data: Vec<u8>) -> Result<Cartridge, String> {
+        let header = Header::new(data[..HEADER_SIZE].try_into().unwrap());
         if header.is_err() {
             return Err(header.err().unwrap());
         }
@@ -87,7 +104,7 @@ impl Cartridge {
         let program_rom_size = header.program_rom_pages * Self::PROGRAM_ROM_PAGE_SIZE;
         let character_rom_size = header.character_rom_pages * Self::CHARACTER_ROM_PAGE_SIZE;
 
-        let program_rom_start = Self::HEADER_SIZE
+        let program_rom_start = HEADER_SIZE
             + if header.has_trainer {
                 Self::TRAINER_SIZE
             } else {
@@ -102,5 +119,23 @@ impl Cartridge {
                 .to_vec(),
             header,
         })
+    }
+
+    pub fn from_path(path: &str) -> Result<Cartridge, String> {
+        let data =
+            std::fs::read(path).expect(format!("Unable to read file from path {}", path).as_str());
+
+        Self::from_bytes(data)
+    }
+
+    #[allow(dead_code)]
+    /// Generate a dummy cartridge with the given program, used for tests
+    pub fn new(data: Vec<u8>) -> Result<Cartridge, String> {
+        let header = Header::generate().to_vec();
+        let mut program: Vec<u8> = vec![header, data].concat();
+        let len = program.len();
+        program.resize(Self::PROGRAM_ROM_PAGE_SIZE + len, 0xEA); // NOP
+        program[len + 1] = 0x00; // BRK
+        Self::from_bytes(program)
     }
 }
