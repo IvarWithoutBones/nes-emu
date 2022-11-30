@@ -7,3 +7,5 @@
 # Direnv
 /.envrc
 /.direnv
+
+/roms

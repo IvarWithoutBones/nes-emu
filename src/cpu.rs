@@ -110,6 +110,7 @@ impl CPU {
         u16::from_le_bytes([self.read_byte(address), self.read_byte(address + 1)])
     }
 
+    #[allow(dead_code)] // Used in unit tests
     fn write_word(&mut self, address: u16, data: u16) {
         self.memory[address as usize..(address + 2) as usize]
             .copy_from_slice(u16::to_le_bytes(data).as_ref());
@@ -209,6 +210,47 @@ impl CPU {
     /*
       Opcodes
     */
+
+    fn rti(&mut self) {
+        self.status = CpuFlags::from_bits_truncate(self.stack_pop_byte());
+        self.program_counter = self.stack_pop_word();
+    }
+
+    fn adc(&mut self, mode: &AdressingMode) {
+        let (addr, next_pc) = self.param_from_adressing_mode(mode);
+        let value = self.read_byte(addr);
+
+        let result = value
+            .wrapping_add(self.accumulator)
+            .wrapping_add(self.status.contains(CpuFlags::CARRY) as u8);
+
+        self.status.set(CpuFlags::CARRY, result < value);
+        self.status.set(
+            CpuFlags::OVERFLOW,
+            CPU::nth_bit(self.accumulator, 7) == CPU::nth_bit(value, 7)
+                && CPU::nth_bit(self.accumulator, 7) != CPU::nth_bit(result, 7),
+        );
+
+        self.program_counter = next_pc;
+    }
+
+    fn sdc(&mut self, mode: &AdressingMode) {
+        let (addr, next_pc) = self.param_from_adressing_mode(mode);
+        let value = self.read_byte(addr);
+
+        let result = value
+            .wrapping_sub(self.accumulator)
+            .wrapping_sub(self.status.contains(CpuFlags::CARRY) as u8);
+
+        self.status.set(CpuFlags::CARRY, result > value);
+        self.status.set(
+            CpuFlags::OVERFLOW,
+            CPU::nth_bit(self.accumulator, 7) == CPU::nth_bit(value, 7)
+                && CPU::nth_bit(self.accumulator, 7) != CPU::nth_bit(result, 7),
+        );
+
+        self.program_counter = next_pc;
+    }
 
     fn branch(&mut self, condition: bool) {
         if condition {
@@ -537,16 +579,41 @@ impl CPU {
                 0xEA => continue, // NOP
                 0x00 => return,   // BRK
 
+                0x40 => self.rti(),
+
+                0x69 => self.adc(&AdressingMode::Immediate),
+                0x65 => self.adc(&AdressingMode::ZeroPage),
+                0x75 => self.adc(&AdressingMode::ZeroPageX),
+                0x6D => self.adc(&AdressingMode::Absolute),
+                0x7D => self.adc(&AdressingMode::AbsoluteX),
+                0x79 => self.adc(&AdressingMode::AbsoluteY),
+                0x61 => self.adc(&AdressingMode::IndirectX),
+                0x71 => self.adc(&AdressingMode::IndirectY),
+
+                0xE9 => self.sdc(&AdressingMode::Immediate),
+                0xE5 => self.sdc(&AdressingMode::ZeroPage),
+                0xF5 => self.sdc(&AdressingMode::ZeroPageX),
+                0xED => self.sdc(&AdressingMode::Absolute),
+                0xFD => self.sdc(&AdressingMode::AbsoluteX),
+                0xF9 => self.sdc(&AdressingMode::AbsoluteY),
+                0xE1 => self.sdc(&AdressingMode::IndirectX),
+                0xF1 => self.sdc(&AdressingMode::IndirectY),
+
+                // BCS
                 0xB0 => self.branch(self.status.contains(CpuFlags::CARRY)),
+                // BCC
                 0x90 => self.branch(!self.status.contains(CpuFlags::CARRY)),
-
+                // BEQ
                 0xF0 => self.branch(self.status.contains(CpuFlags::ZERO)),
+                // BNE
                 0xD0 => self.branch(!self.status.contains(CpuFlags::ZERO)),
-
+                // BMI
                 0x30 => self.branch(self.status.contains(CpuFlags::NEGATIVE)),
+                // BPL
                 0x10 => self.branch(!self.status.contains(CpuFlags::NEGATIVE)),
-
+                // BVS
                 0x70 => self.branch(self.status.contains(CpuFlags::OVERFLOW)),
+                // BVC
                 0x50 => self.branch(!self.status.contains(CpuFlags::OVERFLOW)),
 
                 0x08 => self.php(),
