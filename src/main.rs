@@ -1,6 +1,7 @@
 mod bus;
 mod cartridge;
 mod cpu;
+mod instructions;
 
 use cartridge::Cartridge;
 use cpu::CPU;
