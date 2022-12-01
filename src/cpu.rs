@@ -1,7 +1,5 @@
 use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
-use crate::instructions::{
-    into_instruction, opcodes, opcodes::Instruction, print_instruction, AdressingMode,
-};
+use crate::instructions::{parse_instruction, print_instruction};
 use crate::Cartridge;
 use bitflags::bitflags;
 
@@ -94,22 +92,19 @@ impl CPU {
             let opcode = self.read_byte(self.program_counter);
             self.program_counter += 1;
 
-            let (instruction, mode) = into_instruction(opcode).expect("Invalid opcode");
+            let (name, mode, func) = parse_instruction(opcode).expect("Invalid opcode");
 
             print_instruction(
                 self.program_counter,
-                instruction.name(),
+                name,
                 self.read_word(self.program_counter),
             );
 
-            if opcodes::Brk
-                .opcodes()
-                .contains(&(opcode, AdressingMode::Implied))
-            {
+            if name == "BRK" {
                 break;
             };
 
-            self.program_counter = instruction.execute(self, &mode);
+            self.program_counter = func(self, mode);
         }
     }
 }
