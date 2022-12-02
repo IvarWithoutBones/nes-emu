@@ -30,13 +30,14 @@ pub struct CPU {
     pub stack_pointer: u8,
     pub status: CpuFlags,
     pub bus: Bus,
+    quiet: bool,
 }
 
 impl CPU {
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
 
-    pub fn new(cartridge: Cartridge) -> CPU {
+    pub fn new(cartridge: Cartridge, quiet: bool) -> CPU {
         CPU {
             program_counter: PROGRAM_ROM_START,
             stack_pointer: CPU::STACK_RESET,
@@ -45,6 +46,7 @@ impl CPU {
             accumulator: 0,
             register_x: 0,
             register_y: 0,
+            quiet,
         }
     }
 
@@ -96,8 +98,10 @@ impl CPU {
             let (instr, mode) =
                 parse_instruction(opcode).expect(format!("Invalid opcode {}", opcode).as_str());
 
-            let instr_str = format_instruction(self, instr, mode);
-            println!("{0: <24}\t{1:}", instr_str, self);
+            if !self.quiet {
+                let instr_str = format_instruction(self, instr, mode);
+                println!("{0: <24}\t{1:}", instr_str, self);
+            }
 
             if instruction_name(instr) == "BRK" {
                 break;
@@ -150,7 +154,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(cart);
+                let mut cpu = CPU::new(cart, true);
                 cpu.run();
                 $callback(cpu);
             }
@@ -160,7 +164,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(cart);
+                let mut cpu = CPU::new(cart, true);
                 $callback(&mut cpu);
             }
         };
@@ -169,7 +173,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new([0].to_vec()).unwrap();
-                let mut cpu = CPU::new(cart);
+                let mut cpu = CPU::new(cart, true);
                 $callback(&mut cpu);
             }
         };

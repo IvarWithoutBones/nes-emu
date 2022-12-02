@@ -4,16 +4,22 @@ mod cpu;
 mod instructions;
 
 use cartridge::Cartridge;
+use clap::Parser;
 use cpu::CPU;
-use std::env;
+
+#[derive(Parser)]
+#[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
+struct Args {
+    #[arg(short, long)]
+    quiet: bool,
+
+    #[arg(short, long)]
+    rom: String,
+}
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("No ROM specified");
-    }
-
-    let mut cpu = CPU::new(Cartridge::from_path(&args[1]).unwrap());
+    let args = Args::parse();
+    let mut cpu = CPU::new(Cartridge::from_path(&args.rom).unwrap(), args.quiet);
     cpu.reset();
     cpu.run();
 }
