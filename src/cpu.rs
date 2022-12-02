@@ -1,6 +1,8 @@
+use std::fmt;
+
 use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
 use crate::instructions::{
-    execute_instruction, instruction_name, parse_instruction, print_instruction,
+    execute_instruction, format_instruction, instruction_name, parse_instruction,
 };
 use crate::Cartridge;
 use bitflags::bitflags;
@@ -20,7 +22,6 @@ bitflags! {
     }
 }
 
-/// See https://www.nesdev.org/obelisk-6502-guide/reference.html
 pub struct CPU {
     pub accumulator: u8,
     pub register_x: u8,
@@ -95,15 +96,25 @@ impl CPU {
             let (instr, mode) =
                 parse_instruction(opcode).expect(format!("Invalid opcode {}", opcode).as_str());
 
-            //
+            let instr_str = format_instruction(self, instr, mode);
+            println!("{0: <24}\t{1:}", instr_str, self);
+
             if instruction_name(instr) == "BRK" {
                 break;
             };
 
-            print_instruction(self, instr, mode);
-
             self.program_counter = execute_instruction(self, instr, mode);
         }
+    }
+}
+
+impl fmt::Display for CPU {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A: {}, X: {}, Y: {}, SP: {:#x}",
+            self.accumulator, self.register_x, self.register_y, self.stack_pointer
+        )
     }
 }
 

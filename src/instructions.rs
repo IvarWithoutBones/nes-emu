@@ -2,6 +2,57 @@ use crate::bus::Memory;
 use crate::cpu::{CpuFlags, CPU};
 use std::fmt;
 
+type Instruction = (
+    &'static str,
+    fn(cpu: &mut CPU, mode: &AdressingMode) -> u16,
+    &'static [(u8, &'static AdressingMode)],
+);
+
+/// Retrieve an instruction based on an identifier
+pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'static AdressingMode)> {
+    for instr in INSTRUCTIONS.iter() {
+        for (opcode, mode) in instr.2 {
+            if *opcode == identifier {
+                return Some((instr, mode));
+            }
+        }
+    }
+    None
+}
+
+pub fn execute_instruction(
+    cpu: &mut CPU,
+    instr: &'static Instruction,
+    mode: &AdressingMode,
+) -> u16 {
+    (instr.1)(cpu, mode)
+}
+
+pub fn instruction_name(instr: &'static Instruction) -> &'static str {
+    instr.0
+}
+
+pub fn format_instruction(cpu: &CPU, instr: &'static Instruction, mode: &AdressingMode) -> String {
+    let args = if mode.has_arguments() {
+        format!("{:#04x}", mode.fetch_params(cpu))
+    } else {
+        "".to_string()
+    };
+
+    format!(
+        "{:#06x}: ({1: <3}) {2: <3} {3: <4}",
+        cpu.program_counter,
+        mode,
+        instruction_name(instr),
+        args
+    )
+}
+
+/// Get the next program counter based on the adressing mode
+const fn increment_pc(pc: u16, mode: &AdressingMode) -> u16 {
+    pc + mode.opcode_len()
+}
+
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 #[derive(Debug, PartialEq)]
 pub enum AdressingMode {
@@ -23,24 +74,32 @@ pub enum AdressingMode {
 impl fmt::Display for AdressingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Implied => write!(f, "Implied"),
-            Self::Relative => write!(f, "Relative"),
-            Self::Immediate => write!(f, "Immediate"),
-            Self::Accumulator => write!(f, "Accumulator"),
-            Self::Indirect => write!(f, "Indirect"),
-            Self::IndirectX => write!(f, "Indirect,X"),
-            Self::IndirectY => write!(f, "Indirect,Y"),
-            Self::Absolute => write!(f, "Absolute"),
-            Self::AbsoluteX => write!(f, "Absolute,X"),
-            Self::AbsoluteY => write!(f, "Absolute,Y"),
-            Self::ZeroPage => write!(f, "ZeroPage"),
-            Self::ZeroPageX => write!(f, "ZeroPage,X"),
-            Self::ZeroPageY => write!(f, "ZeroPage,Y"),
+            Self::Implied => write!(f, "Imp"),
+            Self::Relative => write!(f, "Rel"),
+            Self::Immediate => write!(f, "Imm"),
+            Self::Accumulator => write!(f, "Acc"),
+            Self::Indirect => write!(f, "Ind"),
+            Self::IndirectX => write!(f, "InX"),
+            Self::IndirectY => write!(f, "InY"),
+            Self::Absolute => write!(f, "Abs"),
+            Self::AbsoluteX => write!(f, "AbX"),
+            Self::AbsoluteY => write!(f, "AbY"),
+            Self::ZeroPage => write!(f, "Zer"),
+            Self::ZeroPageX => write!(f, "ZeX"),
+            Self::ZeroPageY => write!(f, "ZeY"),
         }
     }
 }
 
 impl AdressingMode {
+    const fn has_arguments(&self) -> bool {
+        match self {
+            AdressingMode::Implied | AdressingMode::Accumulator => false,
+            _ => true,
+        }
+    }
+
+    // The length of an instruction, counting the identifier and arguments
     const fn opcode_len(&self) -> u16 {
         match self {
             AdressingMode::Implied | AdressingMode::Accumulator => 1,
@@ -57,53 +116,77 @@ impl AdressingMode {
             AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => 3,
         }
     }
-}
 
-type InstructionFunc = fn(cpu: &mut CPU, mode: &AdressingMode) -> u16;
+    fn fetch_params(&self, cpu: &CPU) -> u16 {
+        let after_opcode = cpu.program_counter + 1;
+        match self {
+            AdressingMode::Immediate => after_opcode,
+            AdressingMode::Absolute => cpu.read_word(after_opcode),
+            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
 
-type InstructionContainer = (
-    &'static str,
-    InstructionFunc,
-    &'static [(u8, &'static AdressingMode)],
-);
+            AdressingMode::Relative => {
+                // TODO: is this correct?
+                let offset = cpu.read_byte(after_opcode);
+                after_opcode.wrapping_add(offset as u16)
+            }
 
-/// Retrieve an instruction based on an opcode, or return None if no matching instruction is found.
-pub fn parse_instruction(
-    identifier: u8,
-) -> Option<(&'static InstructionContainer, &'static AdressingMode)> {
-    for instr in INSTRUCTIONS.iter() {
-        for (opcode, mode) in instr.2 {
-            if *opcode == identifier {
-                return Some((instr, mode));
+            AdressingMode::ZeroPageX => {
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16
+            }
+
+            AdressingMode::ZeroPageY => {
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16
+            }
+
+            AdressingMode::AbsoluteX => cpu
+                .read_word(after_opcode)
+                .wrapping_add(cpu.register_x as u16),
+
+            AdressingMode::AbsoluteY => cpu
+                .read_word(after_opcode)
+                .wrapping_add(cpu.register_y as u16),
+
+            AdressingMode::Indirect => {
+                // TODO: ignoring page boundary bug
+                let ptr = cpu.read_word(after_opcode);
+
+                u16::from_le_bytes([
+                    cpu.read_byte(ptr as u16),
+                    cpu.read_byte((ptr as u16).wrapping_add(1)),
+                ])
+            }
+
+            AdressingMode::IndirectX => {
+                let ptr = cpu
+                    .read_word(after_opcode)
+                    .wrapping_add(cpu.register_x.into());
+
+                u16::from_le_bytes([
+                    cpu.read_byte(ptr as u16),
+                    cpu.read_byte((ptr as u16).wrapping_add(1)),
+                ])
+            }
+
+            AdressingMode::IndirectY => {
+                let ptr = cpu.read_word(after_opcode);
+
+                u16::from_le_bytes([
+                    cpu.read_byte(ptr as u16),
+                    cpu.read_byte((ptr as u16).wrapping_add(1)),
+                ])
+                .wrapping_add(cpu.register_y as u16)
+            }
+
+            AdressingMode::Implied | AdressingMode::Accumulator => {
+                panic!("Addressing mode {} has no arguments!", self);
             }
         }
     }
-    None
-}
-
-pub fn execute_instruction(
-    cpu: &mut CPU,
-    instr: &'static InstructionContainer,
-    mode: &AdressingMode,
-) -> u16 {
-    (instr.1)(cpu, mode)
-}
-
-pub fn instruction_name(instr: &'static InstructionContainer) -> &'static str {
-    instr.0
-}
-
-pub fn print_instruction(cpu: &CPU, instr: &'static InstructionContainer, mode: &AdressingMode) {
-    println!(
-        "{:#06x}: {} ({})",
-        cpu.program_counter,
-        instruction_name(instr),
-        mode
-    );
 }
 
 #[rustfmt::skip]
-const INSTRUCTIONS: [InstructionContainer; 57] = [
+/// See https://www.nesdev.org/obelisk-6502-guide/reference.html
+const INSTRUCTIONS: [Instruction; 57] = [
     ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
     ("NOP", opcodes::nop, &[(0xEA, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),
@@ -331,78 +414,6 @@ const INSTRUCTIONS: [InstructionContainer; 57] = [
 mod opcodes {
     use super::*;
 
-    /// Get the next program counter based on the adressing mode
-    const fn increment_pc(pc: u16, mode: &AdressingMode) -> u16 {
-        pc + mode.opcode_len()
-    }
-
-    /// Get the memory address of an parameter, based on the adressing mode
-    fn get_params(cpu: &CPU, mode: &AdressingMode) -> u16 {
-        let after_opcode = cpu.program_counter + 1;
-        match mode {
-            AdressingMode::Immediate => after_opcode,
-            AdressingMode::Absolute => cpu.read_word(after_opcode),
-            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
-
-            AdressingMode::Relative => {
-                // TODO: is this correct?
-                let offset = cpu.read_byte(after_opcode) as i8;
-                after_opcode.wrapping_add(offset as u16)
-            }
-
-            AdressingMode::ZeroPageX => cpu
-                .read_byte(after_opcode)
-                .wrapping_add(cpu.register_x) as u16,
-
-            AdressingMode::ZeroPageY => cpu
-                .read_byte(after_opcode)
-                .wrapping_add(cpu.register_y) as u16,
-
-            AdressingMode::AbsoluteX => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_x as u16),
-
-            AdressingMode::AbsoluteY => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_y as u16),
-
-            AdressingMode::Indirect => {
-                // TODO: ignoring page boundary bug
-                let ptr = cpu.read_word(after_opcode);
-
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
-                ])
-            }
-
-            AdressingMode::IndirectX => {
-                let ptr = cpu
-                    .read_word(after_opcode)
-                    .wrapping_add(cpu.register_x.into());
-
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
-                ])
-            }
-
-            AdressingMode::IndirectY => {
-                let ptr = cpu.read_word(after_opcode);
-
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
-                ])
-                .wrapping_add(cpu.register_y as u16)
-            }
-
-            AdressingMode::Implied | AdressingMode::Accumulator => {
-                panic!("Addressing mode has no parameters")
-            }
-        }
-    }
-
     pub fn nop(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         increment_pc(cpu.program_counter, mode)
     }
@@ -413,7 +424,7 @@ mod opcodes {
     }
 
     pub fn jmp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        get_params(cpu, mode)
+        mode.fetch_params(cpu)
     }
 
     pub fn inx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -426,7 +437,7 @@ mod opcodes {
     }
 
     pub fn inc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr).wrapping_add(1); // Should this be a word?
 
         cpu.write_byte(addr, value);
@@ -441,7 +452,7 @@ mod opcodes {
     }
 
     pub fn adc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         let result = value
@@ -460,7 +471,7 @@ mod opcodes {
     }
 
     pub fn sdc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         let result = value
@@ -479,7 +490,7 @@ mod opcodes {
     }
 
     pub fn cmp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
@@ -489,7 +500,7 @@ mod opcodes {
     }
 
     pub fn cpx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.status.set(CpuFlags::CARRY, cpu.register_x >= value);
@@ -499,7 +510,7 @@ mod opcodes {
     }
 
     pub fn cpy(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.status.set(CpuFlags::CARRY, cpu.register_y >= value);
@@ -509,7 +520,7 @@ mod opcodes {
     }
 
     pub fn dec(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr).wrapping_sub(1); // Should this be a word?
 
         cpu.write_byte(addr, value);
@@ -531,7 +542,7 @@ mod opcodes {
 
     pub fn bcs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if cpu.status.contains(CpuFlags::CARRY) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -539,7 +550,7 @@ mod opcodes {
 
     pub fn bcc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if !cpu.status.contains(CpuFlags::CARRY) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -547,7 +558,7 @@ mod opcodes {
 
     pub fn beq(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if cpu.status.contains(CpuFlags::ZERO) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -555,7 +566,7 @@ mod opcodes {
 
     pub fn bne(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if !cpu.status.contains(CpuFlags::ZERO) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -563,7 +574,7 @@ mod opcodes {
 
     pub fn bmi(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if cpu.status.contains(CpuFlags::NEGATIVE) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -571,7 +582,7 @@ mod opcodes {
 
     pub fn bpl(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if !cpu.status.contains(CpuFlags::NEGATIVE) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -579,7 +590,7 @@ mod opcodes {
 
     pub fn bvs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if cpu.status.contains(CpuFlags::OVERFLOW) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -587,7 +598,7 @@ mod opcodes {
 
     pub fn bvc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if !cpu.status.contains(CpuFlags::OVERFLOW) {
-            get_params(cpu, mode)
+            mode.fetch_params(cpu)
         } else {
             increment_pc(cpu.program_counter, mode)
         }
@@ -681,7 +692,7 @@ mod opcodes {
     }
 
     pub fn jsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let new_pc = increment_pc(cpu.program_counter, mode);
         cpu.stack_push_word(new_pc - 1);
         addr
@@ -693,7 +704,7 @@ mod opcodes {
     }
 
     pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
@@ -713,7 +724,7 @@ mod opcodes {
     }
 
     pub fn asl(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
@@ -733,7 +744,7 @@ mod opcodes {
     }
 
     pub fn ror(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
@@ -753,7 +764,7 @@ mod opcodes {
     }
 
     pub fn rol(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
@@ -773,7 +784,7 @@ mod opcodes {
     }
 
     pub fn and(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.accumulator &= value;
@@ -783,7 +794,7 @@ mod opcodes {
     }
 
     pub fn eor(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.accumulator ^= value;
@@ -793,7 +804,7 @@ mod opcodes {
     }
 
     pub fn ora(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.accumulator |= value;
@@ -803,7 +814,7 @@ mod opcodes {
     }
 
     pub fn lda(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.accumulator = value;
@@ -813,7 +824,7 @@ mod opcodes {
     }
 
     pub fn ldx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.register_x = value;
@@ -823,7 +834,7 @@ mod opcodes {
     }
 
     pub fn ldy(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.register_y = value;
@@ -833,25 +844,25 @@ mod opcodes {
     }
 
     pub fn sta(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         cpu.write_byte(addr, cpu.accumulator);
         increment_pc(cpu.program_counter, mode)
     }
 
     pub fn stx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         cpu.write_byte(addr, cpu.register_x);
         increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sty(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         cpu.write_byte(addr, cpu.register_y);
         increment_pc(cpu.program_counter, mode)
     }
 
     pub fn bit(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = get_params(cpu, mode);
+        let addr = mode.fetch_params(cpu);
         let value = cpu.read_byte(addr);
 
         cpu.status
