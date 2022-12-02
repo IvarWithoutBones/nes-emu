@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2.0.0-rc.1"
-lazy_static = "1.4.0"
+clap = { version = "4.0.29", features = ["derive"] }

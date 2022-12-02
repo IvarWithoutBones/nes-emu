@@ -4,7 +4,6 @@ use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
 use crate::instructions::{
     execute_instruction, format_instruction, instruction_name, parse_instruction,
 };
-use crate::Cartridge;
 use bitflags::bitflags;
 
 bitflags! {
@@ -30,23 +29,21 @@ pub struct CPU {
     pub stack_pointer: u8,
     pub status: CpuFlags,
     pub bus: Bus,
-    quiet: bool,
 }
 
 impl CPU {
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
 
-    pub fn new(cartridge: Cartridge, quiet: bool) -> CPU {
+    pub fn new(bus: Bus) -> CPU {
         CPU {
             program_counter: PROGRAM_ROM_START,
             stack_pointer: CPU::STACK_RESET,
             status: CpuFlags::empty(),
-            bus: Bus::new(cartridge),
             accumulator: 0,
             register_x: 0,
             register_y: 0,
-            quiet,
+            bus,
         }
     }
 
@@ -98,7 +95,7 @@ impl CPU {
             let (instr, mode) =
                 parse_instruction(opcode).expect(format!("Invalid opcode {}", opcode).as_str());
 
-            if !self.quiet {
+            if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
                 println!("{0: <24}\t{1:}", instr_str, self);
             }
@@ -135,6 +132,7 @@ impl Memory for CPU {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::Cartridge;
 
     #[test]
     fn test_nth_bit() {
@@ -154,7 +152,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(cart, true);
+                let mut cpu = CPU::new(Bus::new(cart, true));
                 cpu.run();
                 $callback(cpu);
             }
@@ -164,7 +162,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(cart, true);
+                let mut cpu = CPU::new(Bus::new(cart, true));
                 $callback(&mut cpu);
             }
         };
@@ -173,7 +171,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new([0].to_vec()).unwrap();
-                let mut cpu = CPU::new(cart, true);
+                let mut cpu = CPU::new(Bus::new(cart, true));
                 $callback(&mut cpu);
             }
         };

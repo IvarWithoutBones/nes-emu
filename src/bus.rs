@@ -28,13 +28,16 @@ pub trait Memory {
 pub struct Bus {
     pub cartridge: Cartridge,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
+    // This is convenient as the bus is the middle man between other components
+    pub quiet: bool,
 }
 
 impl Bus {
-    pub fn new(cartridge: Cartridge) -> Self {
+    pub fn new(cartridge: Cartridge, quiet: bool) -> Self {
         Bus {
             cpu_ram: [0; CPU_RAM_SIZE],
             cartridge,
+            quiet,
         }
     }
 
