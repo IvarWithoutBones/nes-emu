@@ -1,5 +1,7 @@
 use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
-use crate::instructions::{parse_instruction, print_instruction};
+use crate::instructions::{
+    execute_instruction, instruction_name, parse_instruction, print_instruction,
+};
 use crate::Cartridge;
 use bitflags::bitflags;
 
@@ -90,21 +92,17 @@ impl CPU {
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            self.program_counter += 1;
+            let (instr, mode) =
+                parse_instruction(opcode).expect(format!("Invalid opcode {}", opcode).as_str());
 
-            let (name, mode, func) = parse_instruction(opcode).expect("Invalid opcode");
-
-            print_instruction(
-                self.program_counter,
-                name,
-                self.read_word(self.program_counter),
-            );
-
-            if name == "BRK" {
+            //
+            if instruction_name(instr) == "BRK" {
                 break;
             };
 
-            self.program_counter = func(self, mode);
+            print_instruction(self, instr, mode);
+
+            self.program_counter = execute_instruction(self, instr, mode);
         }
     }
 }
@@ -175,7 +173,7 @@ mod test {
     });
 
     test_cpu!(test_jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
-        assert_eq!(cpu.program_counter, 0x0011); // Plus one because of BRK instruction decoding
+        assert_eq!(cpu.program_counter, 0x0010);
     });
 
     test_cpu!(
@@ -185,7 +183,7 @@ mod test {
         |cpu: &mut CPU| {
             cpu.write_byte(0x00ff, 0x00);
             cpu.run();
-            assert_eq!(cpu.program_counter, 0x0001); // Plus one because of BRK instruction decoding
+            assert_eq!(cpu.program_counter, 0x0000)
         }
     );
 

@@ -1,5 +1,6 @@
 use crate::bus::Memory;
 use crate::cpu::{CpuFlags, CPU};
+use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 #[derive(Debug, PartialEq)]
@@ -19,31 +20,86 @@ pub enum AdressingMode {
     ZeroPageY,
 }
 
-type Instruction = fn(cpu: &mut CPU, mode: &AdressingMode) -> u16;
+impl fmt::Display for AdressingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Implied => write!(f, "Implied"),
+            Self::Relative => write!(f, "Relative"),
+            Self::Immediate => write!(f, "Immediate"),
+            Self::Accumulator => write!(f, "Accumulator"),
+            Self::Indirect => write!(f, "Indirect"),
+            Self::IndirectX => write!(f, "Indirect,X"),
+            Self::IndirectY => write!(f, "Indirect,Y"),
+            Self::Absolute => write!(f, "Absolute"),
+            Self::AbsoluteX => write!(f, "Absolute,X"),
+            Self::AbsoluteY => write!(f, "Absolute,Y"),
+            Self::ZeroPage => write!(f, "ZeroPage"),
+            Self::ZeroPageX => write!(f, "ZeroPage,X"),
+            Self::ZeroPageY => write!(f, "ZeroPage,Y"),
+        }
+    }
+}
+
+impl AdressingMode {
+    const fn opcode_len(&self) -> u16 {
+        match self {
+            AdressingMode::Implied | AdressingMode::Accumulator => 1,
+
+            AdressingMode::Immediate
+            | AdressingMode::Relative
+            | AdressingMode::Indirect
+            | AdressingMode::IndirectX
+            | AdressingMode::IndirectY
+            | AdressingMode::ZeroPage
+            | AdressingMode::ZeroPageX
+            | AdressingMode::ZeroPageY => 2,
+
+            AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => 3,
+        }
+    }
+}
+
+type InstructionFunc = fn(cpu: &mut CPU, mode: &AdressingMode) -> u16;
 
 type InstructionContainer = (
     &'static str,
-    Instruction,
+    InstructionFunc,
     &'static [(u8, &'static AdressingMode)],
 );
 
-/// Retrieve the instruction from an opcode
+/// Retrieve an instruction based on an opcode, or return None if no matching instruction is found.
 pub fn parse_instruction(
     identifier: u8,
-) -> Option<(&'static str, &'static AdressingMode, Instruction)> {
+) -> Option<(&'static InstructionContainer, &'static AdressingMode)> {
     for instr in INSTRUCTIONS.iter() {
-        for (opcode, _) in instr.2 {
+        for (opcode, mode) in instr.2 {
             if *opcode == identifier {
-                return Some((instr.0, instr.2[0].1, instr.1));
+                return Some((instr, mode));
             }
         }
     }
     None
 }
 
-/// Pretty-print an instruction to the console
-pub fn print_instruction(program_counter: u16, name: &'static str, params: u16) {
-    println!("{:#06x}: {} {:#x}", program_counter, name, params);
+pub fn execute_instruction(
+    cpu: &mut CPU,
+    instr: &'static InstructionContainer,
+    mode: &AdressingMode,
+) -> u16 {
+    (instr.1)(cpu, mode)
+}
+
+pub fn instruction_name(instr: &'static InstructionContainer) -> &'static str {
+    instr.0
+}
+
+pub fn print_instruction(cpu: &CPU, instr: &'static InstructionContainer, mode: &AdressingMode) {
+    println!(
+        "{:#06x}: {} ({})",
+        cpu.program_counter,
+        instruction_name(instr),
+        mode
+    );
 }
 
 #[rustfmt::skip]
@@ -276,55 +332,43 @@ mod opcodes {
     use super::*;
 
     /// Get the next program counter based on the adressing mode
-    const fn consume_params(pc: u16, mode: &AdressingMode) -> u16 {
-        match mode {
-            AdressingMode::Implied | AdressingMode::Accumulator => pc,
-
-            AdressingMode::Immediate
-            | AdressingMode::Relative
-            | AdressingMode::Indirect
-            | AdressingMode::IndirectX
-            | AdressingMode::IndirectY
-            | AdressingMode::ZeroPage
-            | AdressingMode::ZeroPageX
-            | AdressingMode::ZeroPageY => pc + 1,
-
-            AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => pc + 2,
-        }
+    const fn increment_pc(pc: u16, mode: &AdressingMode) -> u16 {
+        pc + mode.opcode_len()
     }
 
     /// Get the memory address of an parameter, based on the adressing mode
     fn get_params(cpu: &CPU, mode: &AdressingMode) -> u16 {
+        let after_opcode = cpu.program_counter + 1;
         match mode {
-            AdressingMode::Immediate => cpu.program_counter,
-            AdressingMode::Absolute => cpu.read_word(cpu.program_counter),
-            AdressingMode::ZeroPage => cpu.read_byte(cpu.program_counter) as u16,
+            AdressingMode::Immediate => after_opcode,
+            AdressingMode::Absolute => cpu.read_word(after_opcode),
+            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
 
             AdressingMode::Relative => {
                 // TODO: is this correct?
-                let offset = cpu.read_byte(cpu.program_counter) as i8;
-                cpu.program_counter.wrapping_add(offset as u16)
+                let offset = cpu.read_byte(after_opcode) as i8;
+                after_opcode.wrapping_add(offset as u16)
             }
 
             AdressingMode::ZeroPageX => cpu
-                .read_byte(cpu.program_counter)
+                .read_byte(after_opcode)
                 .wrapping_add(cpu.register_x) as u16,
 
             AdressingMode::ZeroPageY => cpu
-                .read_byte(cpu.program_counter)
+                .read_byte(after_opcode)
                 .wrapping_add(cpu.register_y) as u16,
 
             AdressingMode::AbsoluteX => cpu
-                .read_word(cpu.program_counter)
+                .read_word(after_opcode)
                 .wrapping_add(cpu.register_x as u16),
 
             AdressingMode::AbsoluteY => cpu
-                .read_word(cpu.program_counter)
+                .read_word(after_opcode)
                 .wrapping_add(cpu.register_y as u16),
 
             AdressingMode::Indirect => {
                 // TODO: ignoring page boundary bug
-                let ptr = cpu.read_word(cpu.program_counter);
+                let ptr = cpu.read_word(after_opcode);
 
                 u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
@@ -334,7 +378,7 @@ mod opcodes {
 
             AdressingMode::IndirectX => {
                 let ptr = cpu
-                    .read_word(cpu.program_counter)
+                    .read_word(after_opcode)
                     .wrapping_add(cpu.register_x.into());
 
                 u16::from_le_bytes([
@@ -344,7 +388,7 @@ mod opcodes {
             }
 
             AdressingMode::IndirectY => {
-                let ptr = cpu.read_word(cpu.program_counter);
+                let ptr = cpu.read_word(after_opcode);
 
                 u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
@@ -359,24 +403,13 @@ mod opcodes {
         }
     }
 
-    pub trait Instruction {
-        /// The opcodes used by this instruction together with the corresponding addressing mode
-        fn opcodes(&self) -> &'static [(u8, AdressingMode)];
-
-        /// The name of the instruction, used for assembly output
-        fn name(&self) -> &'static str;
-
-        /// Execute the opcode, returning the next program counter
-        fn execute(&self, cpu: &mut CPU, mode: &AdressingMode) -> u16;
-    }
-
     pub fn nop(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn brk(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         // Let the callee handle this
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn jmp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -385,11 +418,11 @@ mod opcodes {
 
     pub fn inx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_x = cpu.register_x.wrapping_add(1);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
     pub fn iny(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_y = cpu.register_y.wrapping_add(1);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn inc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -399,7 +432,7 @@ mod opcodes {
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) -> u16 {
@@ -423,7 +456,7 @@ mod opcodes {
         );
 
         cpu.accumulator = result;
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sdc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -442,7 +475,7 @@ mod opcodes {
         );
 
         cpu.accumulator = result;
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn cmp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -452,7 +485,7 @@ mod opcodes {
         cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn cpx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -462,7 +495,7 @@ mod opcodes {
         cpu.status.set(CpuFlags::CARRY, cpu.register_x >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_x.wrapping_sub(value));
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn cpy(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -472,7 +505,7 @@ mod opcodes {
         cpu.status.set(CpuFlags::CARRY, cpu.register_y >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_y.wrapping_sub(value));
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn dec(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -481,26 +514,26 @@ mod opcodes {
 
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn dey(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_y = cpu.register_y.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_y);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn dex(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_x = cpu.register_x.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_x);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn bcs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         if cpu.status.contains(CpuFlags::CARRY) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -508,7 +541,7 @@ mod opcodes {
         if !cpu.status.contains(CpuFlags::CARRY) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -516,7 +549,7 @@ mod opcodes {
         if cpu.status.contains(CpuFlags::ZERO) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -524,7 +557,7 @@ mod opcodes {
         if !cpu.status.contains(CpuFlags::ZERO) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -532,7 +565,7 @@ mod opcodes {
         if cpu.status.contains(CpuFlags::NEGATIVE) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -540,7 +573,7 @@ mod opcodes {
         if !cpu.status.contains(CpuFlags::NEGATIVE) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -548,7 +581,7 @@ mod opcodes {
         if cpu.status.contains(CpuFlags::OVERFLOW) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -556,7 +589,7 @@ mod opcodes {
         if !cpu.status.contains(CpuFlags::OVERFLOW) {
             get_params(cpu, mode)
         } else {
-            consume_params(cpu.program_counter, mode)
+            increment_pc(cpu.program_counter, mode)
         }
     }
 
@@ -566,7 +599,7 @@ mod opcodes {
         status.insert(CpuFlags::BREAK);
         status.insert(CpuFlags::BREAK2);
         cpu.stack_push_byte(status.bits());
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn plp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -574,89 +607,89 @@ mod opcodes {
         cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
         cpu.status.remove(CpuFlags::BREAK);
         cpu.status.insert(CpuFlags::BREAK2);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn pha(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.stack_push_byte(cpu.accumulator);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn pla(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.stack_push_byte(cpu.accumulator);
         cpu.update_zero_and_negative_flags(cpu.accumulator);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn tax(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_x = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_x);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn txa(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.accumulator = cpu.register_x;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn tay(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_y = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_y);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn tya(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.accumulator = cpu.register_y;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn clv(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.remove(CpuFlags::OVERFLOW);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn clc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.remove(CpuFlags::CARRY);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn cld(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.remove(CpuFlags::DECIMAL);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sec(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.insert(CpuFlags::CARRY);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sed(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.insert(CpuFlags::DECIMAL);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sei(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.insert(CpuFlags::IRQ);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn cli(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.status.remove(CpuFlags::IRQ);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn jsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = get_params(cpu, mode);
-        let new_pc = consume_params(cpu.program_counter, mode);
+        let new_pc = increment_pc(cpu.program_counter, mode);
         cpu.stack_push_word(new_pc - 1);
         addr
     }
 
     pub fn rts(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = cpu.stack_pop_word();
-        consume_params(addr + 1, mode)
+        increment_pc(addr + 1, mode)
     }
 
     pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -676,7 +709,7 @@ mod opcodes {
         };
 
         cpu.update_zero_and_negative_flags(result);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn asl(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -696,7 +729,7 @@ mod opcodes {
         };
 
         cpu.update_zero_and_negative_flags(result);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn ror(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -716,7 +749,7 @@ mod opcodes {
         };
 
         cpu.update_zero_and_negative_flags(result);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn rol(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -736,7 +769,7 @@ mod opcodes {
         };
 
         cpu.update_zero_and_negative_flags(result);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn and(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -746,7 +779,7 @@ mod opcodes {
         cpu.accumulator &= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn eor(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -756,7 +789,7 @@ mod opcodes {
         cpu.accumulator ^= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn ora(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -766,7 +799,7 @@ mod opcodes {
         cpu.accumulator |= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn lda(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -776,7 +809,7 @@ mod opcodes {
         cpu.accumulator = value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn ldx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -786,7 +819,7 @@ mod opcodes {
         cpu.register_x = value;
         cpu.update_zero_and_negative_flags(cpu.register_x);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn ldy(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -796,25 +829,25 @@ mod opcodes {
         cpu.register_y = value;
         cpu.update_zero_and_negative_flags(cpu.register_y);
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sta(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = get_params(cpu, mode);
         cpu.write_byte(addr, cpu.accumulator);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn stx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = get_params(cpu, mode);
         cpu.write_byte(addr, cpu.register_x);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn sty(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = get_params(cpu, mode);
         cpu.write_byte(addr, cpu.register_y);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn bit(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -826,17 +859,17 @@ mod opcodes {
         cpu.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
         cpu.status.set(CpuFlags::OVERFLOW, CPU::nth_bit(value, 6));
 
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn tsx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_x = cpu.stack_pointer;
         cpu.update_zero_and_negative_flags(cpu.register_x);
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 
     pub fn txs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.stack_pointer = cpu.register_x;
-        consume_params(cpu.program_counter, mode)
+        increment_pc(cpu.program_counter, mode)
     }
 }
