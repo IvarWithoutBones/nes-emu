@@ -2,7 +2,7 @@ use crate::bus::Memory;
 use crate::cpu::{CpuFlags, CPU};
 use std::fmt;
 
-type Instruction = (
+pub type Instruction = (
     &'static str,
     fn(cpu: &mut CPU, mode: &AdressingMode) -> u16,
     &'static [(u8, &'static AdressingMode)],
@@ -30,6 +30,18 @@ pub fn execute_instruction(
 
 pub fn instruction_name(instr: &'static Instruction) -> &'static str {
     instr.0
+}
+
+pub fn instruction_identifier(
+    instr: &'static Instruction,
+    mode: &'static AdressingMode,
+) -> Option<u8> {
+    for (opcode, m) in instr.2 {
+        if m == &mode {
+            return Some(*opcode);
+        }
+    }
+    None
 }
 
 pub fn format_instruction(cpu: &CPU, instr: &'static Instruction, mode: &AdressingMode) -> String {
@@ -92,7 +104,7 @@ impl fmt::Display for AdressingMode {
 }
 
 impl AdressingMode {
-    const fn has_arguments(&self) -> bool {
+    pub const fn has_arguments(&self) -> bool {
         match self {
             AdressingMode::Implied | AdressingMode::Accumulator => false,
             _ => true,
@@ -100,7 +112,7 @@ impl AdressingMode {
     }
 
     // The length of an instruction, counting the identifier and arguments
-    const fn opcode_len(&self) -> u16 {
+    pub const fn opcode_len(&self) -> u16 {
         match self {
             AdressingMode::Implied | AdressingMode::Accumulator => 1,
 
@@ -186,7 +198,7 @@ impl AdressingMode {
 
 #[rustfmt::skip]
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
-const INSTRUCTIONS: [Instruction; 57] = [
+pub const INSTRUCTIONS: [Instruction; 57] = [
     ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
     ("NOP", opcodes::nop, &[(0xEA, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),

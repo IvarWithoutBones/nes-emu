@@ -1,10 +1,10 @@
-use std::fmt;
+mod instructions;
+pub mod assembler;
 
 use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
-use crate::instructions::{
-    execute_instruction, format_instruction, instruction_name, parse_instruction,
-};
 use bitflags::bitflags;
+use instructions::{execute_instruction, format_instruction, instruction_name, parse_instruction};
+use std::fmt;
 
 bitflags! {
     #[rustfmt::skip]

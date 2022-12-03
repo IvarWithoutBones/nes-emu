@@ -1,12 +1,12 @@
 mod bus;
 mod cartridge;
 mod cpu;
-mod instructions;
 
+use crate::assembler::Assembler;
 use bus::Bus;
 use cartridge::Cartridge;
 use clap::Parser;
-use cpu::CPU;
+use cpu::{assembler, CPU};
 
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
@@ -18,7 +18,13 @@ struct Args {
     rom: String,
 }
 
+#[allow(unreachable_code)]
 fn main() {
+    let assembler = Assembler::new("LDA #$12 INX");
+    assembler.print();
+
+    return;
+
     let args = Args::parse();
 
     let cart = Cartridge::from_path(&args.rom);
