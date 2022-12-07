@@ -2,7 +2,6 @@ mod bus;
 mod cartridge;
 mod cpu;
 
-use crate::assembler::Assembler;
 use bus::Bus;
 use cartridge::Cartridge;
 use clap::Parser;
@@ -20,8 +19,7 @@ struct Args {
 
 #[allow(unreachable_code)]
 fn main() {
-    let assembler = Assembler::new("LDA #$12 INX");
-    assembler.print();
+    assembler::run();
 
     return;
 

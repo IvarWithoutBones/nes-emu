@@ -1,146 +1,65 @@
-use crate::cpu::instructions::{instruction_identifier, instruction_name, INSTRUCTIONS};
-use logos::Logos;
+/*
+    IDEA: Translate a string containing assembly code into a list of bytes, which can be executed by the CPU
+    Things that need to be done:
 
-#[derive(Logos, Debug, PartialEq, Copy, Clone)]
-enum Token {
-    #[regex(r"([A-Za-z_])+")]
-    Instr,
+    - Parse the string containing the instructions into an abstract syntax tree
+        - For example, "LDA #00" should be parsed into the following:
+            * "LDA": a "instruction" node
+            * "#": a "(immediate) addressing mode" node
+            * "00": a "address" node
 
-    #[regex(r"#")]
-    Immediate,
+    - Translate the abstract syntax tree into a list of bytes
+        - Look up the "instruction" nodes text in the instruction set.
+            - TODO: Explain function with which this is done
+            - If no instruction is found with that name, throw an error
 
-    #[regex(r"\$[0-9a-fA-F]+")]
-    Address,
+        - Fetch the opcode of the instruction
+            - Check if the instruction has any arguments
+                - If not, just add the only opcode to the list of bytes and skip the rest of the steps
 
-    #[error]
-    #[regex(r"[ \t\n\f]+", logos::skip)] // Skip whitespace
-    Error,
+            - Otherwise, If the instruction does not support any arguments, throw an error
+                - Otherwise, check if the next node is an "addressing mode" which the instruction supports
+                    - If not, throw an error
+
+            - Look up the opcode (number identifying the instruction) for the instruction, based on the "addressing mode"
+                - For example, the opcode for "LDA #" would be opcode "0xa9" (LDA immediate).
+                    - Note that this would throw an error, as an "address" node needs to go after the "addressing mode" node
+
+            - Append the opcode and its arguments to the list of bytes
+                - For example, "LDA #00" would be translated into the following bytes:
+                    * 0xa9
+                    * 0x00
+
+        - Begin all over again until the end of the string is reached
+*/
+
+use crate::cpu::instructions::*;
+
+pub fn run() {
+    let instr = fetch_instruction("LDA").unwrap();
+    let modes = get_modes_for_instr(instr);
+    dbg!(modes);
 }
 
-#[derive(Debug)]
-pub struct Assembler {
-    // bytes: Vec<u8>,
-    // position: usize,
+fn fetch_instruction(name: &str) -> Option<&Instruction> {
+    for instr in INSTRUCTIONS.iter() {
+        if instruction_name(instr) == name {
+            println!("Found instruction: {}", instruction_name(instr));
+            return Some(instr);
+        }
+    }
+    None
 }
 
-impl Assembler {
-    fn get_addr_literal(token: &str) -> u16 {
-        let addr = &token[2..];
-        u16::from_str_radix(addr, 16).unwrap()
+fn get_modes_for_instr(instr: &Instruction) -> Option<Vec<&AdressingMode>> {
+    let mut result = Vec::new();
+    for (_, mode) in instr.2 {
+        result.push(*mode);
     }
 
-    pub fn new(assembly: &str) -> Self {
-        let mut lexer = Token::lexer(assembly);
-        let mut bytes = Vec::new();
-
-        // dbg!(vec!(&lexer
-        //     .clone()
-        //     .map(|(token, span)| (token, span.start, span.end))
-        //     .collect::<Vec<_>>(),));
-
-        loop {
-            let token = lexer.next();
-            if token.is_none() {
-                break;
-            }
-
-            let raw = &assembly[lexer.span()];
-
-            match token {
-                Some(Token::Instr) => {
-                    let upper = raw.to_uppercase();
-                    for instr in INSTRUCTIONS.iter() {
-                        // Found instruction
-                        if instruction_name(instr) == upper {
-                            if let Some(next_token) = lexer.clone().peekable().peek() {
-                                match next_token {
-                                    // Immediate
-                                    Token::Immediate => {
-                                        lexer.next();
-                                        bytes.push(
-                                            instruction_identifier(
-                                                instr,
-                                                &crate::cpu::instructions::AdressingMode::Immediate,
-                                            )
-                                            .expect(
-                                                "Invalid addressing mode implied for instruction",
-                                            ),
-                                        );
-
-                                        let next_token = lexer.next();
-                                        if next_token.is_none() {
-                                            panic!("Expected literal after immediate addressing mode");
-                                        }
-
-                                        if let Token::Address = next_token.unwrap() {
-                                            let addr = Self::get_addr_literal(raw);
-                                            bytes.push((addr & 0xFF) as u8);
-                                            bytes.push((addr >> 8) as u8);
-                                        } else {
-                                            panic!("Expected literal after immediate addressing mode");
-                                        }
-                                    }
-
-                                    _ => {
-                                        bytes.push(
-                                            instruction_identifier(
-                                                instr,
-                                                &crate::cpu::instructions::AdressingMode::Implied,
-                                            )
-                                            .expect("Invalid instruction identifier"),
-                                        );
-                                    }
-                                }
-                            }
-
-                            let (opcode, mode) = instr.2[0];
-                            bytes.push(opcode); // TODO: dont assume first byte is opcode
-
-                            println!("{}: {:02x}", raw, opcode);
-
-                            if mode.has_arguments() {
-                                let mut argument_count = mode.opcode_len() - 1;
-                                while argument_count > 0 {
-                                    println!("arg: {}", argument_count);
-                                    let token = lexer.next();
-                                    if token.is_none() {
-                                        panic!("Unexpected end of input");
-                                    }
-
-                                    let raw_arg = &assembly[lexer.span()];
-                                    println!("arg: {}", raw_arg);
-                                    match token {
-                                        Some(Token::Address) => {
-                                            let real = Assembler::get_addr_literal(raw_arg);
-                                            bytes.push((real & 0xFF) as u8);
-                                            bytes.push(((real >> 8) & 0xFF) as u8);
-                                        }
-                                        _ => panic!("Unexpected token"),
-                                    }
-
-                                    argument_count = argument_count - 1;
-                                }
-                            }
-
-                            break;
-                        }
-                    }
-                }
-
-                _ => {
-                    panic!("Invalid token {:?}: {}", token, raw)
-                }
-            }
-        }
-
-        println!("\n");
-        for byte in bytes.iter() {
-            println!("{:#02x} ", byte);
-        }
-
-        // Self { bytes, position: 0 }
-        Self {}
+    if result.len() != 0 {
+        return Some(result);
+    } else {
+        return None;
     }
-
-    pub fn print(&self) {}
 }
