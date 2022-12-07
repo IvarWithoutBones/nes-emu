@@ -56,7 +56,7 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
-        self.status = CpuFlags::from_bits_truncate(0b100100);
+        self.status = CpuFlags::from_bits_truncate(0x24); // Hack to diff against nestest log
         self.stack_pointer = CPU::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
@@ -106,11 +106,11 @@ impl CPU {
         loop {
             let opcode = self.read_byte(self.program_counter);
             let (instr, mode) =
-                parse_instruction(opcode).expect(format!("Invalid opcode {}", opcode).as_str());
+                parse_instruction(opcode).expect(format!("Invalid opcode {:#02x}", opcode).as_str());
 
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
-                println!("{0: <24}\t{1:}", instr_str, self);
+                println!("{0: <33}\t{1:}", instr_str, self);
             }
 
             if instruction_name(instr) == "BRK" {
@@ -126,7 +126,7 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A: {}, X: {}, Y: {}, P: {}, SP: {:#x}",
+            "A: {:02X}, X: {:02X}, Y: {:02X}, P: {:02X}, SP: {:02x}",
             self.accumulator, self.register_x, self.register_y, self.status, self.stack_pointer
         )
     }

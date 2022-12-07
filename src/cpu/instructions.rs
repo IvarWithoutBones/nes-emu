@@ -50,19 +50,36 @@ pub fn format_instruction(
     instr: &'static Instruction,
     mode: &AdressingMode,
 ) -> String {
-    let args = if mode.has_arguments() {
-        // TODO: Relative mode should do an extra read?
-        format!("{:#04x}", mode.fetch_param_address(cpu))
-    } else {
-        "".to_string()
-    };
+    let mut bytes = String::from(format!("{:02X} ", cpu.read_byte(cpu.program_counter)));
+    let mut args = String::new();
+
+    if mode.has_arguments() {
+        match mode {
+            &AdressingMode::Immediate => {
+                args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu)));
+            }
+            &AdressingMode::Relative => {
+                // TODO: this is hacky, instruction seems to work fine though
+                args = format!("${:02X}", mode.fetch_param_address(cpu).wrapping_add(1));
+            }
+            &AdressingMode::ZeroPage => {
+                args = format!("${:02X}", mode.fetch_param_address(cpu));
+            }
+            _ => args = format!("${:04X}", mode.fetch_param_address(cpu)),
+        }
+
+        for i in 1..mode.opcode_len() {
+            bytes += &format!("{:02X} ", cpu.read_byte(cpu.program_counter + i as u16));
+        }
+    }
 
     format!(
-        "{:#06x}: ({1: <3}) {2: <3} {3: <4}",
+        "{:04X} {1: <9}{2: <3} {3: <6} ({4: <3})",
         cpu.program_counter,
-        mode,
+        bytes,
         instruction_name(instr),
-        args
+        args,
+        mode // TODO: remove this when I remember the assembly syntax
     )
 }
 
@@ -569,7 +586,7 @@ mod opcodes {
     }
 
     pub fn bne(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        cpu.branch(mode, cpu.status.contains(CpuFlags::ZERO))
+        cpu.branch(mode, !cpu.status.contains(CpuFlags::ZERO))
     }
 
     pub fn bmi(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -684,7 +701,8 @@ mod opcodes {
 
     pub fn rts(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = cpu.stack_pop_word();
-        increment_pc(addr + 1, mode)
+        println!("RTS: {:04X}", addr);
+        increment_pc(addr, mode)
     }
 
     pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
