@@ -1,10 +1,21 @@
 use bitflags::bitflags;
+use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
 enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
+}
+
+impl fmt::Display for Mirroring {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Horizontal => write!(f, "horizontal"),
+            Self::Vertical => write!(f, "vertical"),
+            Self::FourScreen => write!(f, "four-screen"),
+        }
+    }
 }
 
 // TODO: Implement more flags
@@ -113,6 +124,17 @@ impl Cartridge {
 
         let character_rom_start = program_rom_start + program_rom_size;
 
+        println!("cartridge metadata:");
+        println!("\t{} mirroring", header.mirroring);
+        println!(
+            "\t{} program ROM page(s), {} bytes",
+            header.program_rom_pages, program_rom_size
+        );
+        println!(
+            "\t{} character ROM page(s), {} bytes",
+            header.character_rom_pages, character_rom_size
+        );
+
         Ok(Cartridge {
             program_rom: data[program_rom_start..(program_rom_start + program_rom_size)].to_vec(),
             character_rom: data[character_rom_start..(character_rom_start + character_rom_size)]
@@ -122,8 +144,11 @@ impl Cartridge {
     }
 
     pub fn from_path(path: &str) -> Result<Cartridge, String> {
-        let data =
-            std::fs::read(path).expect(format!("Unable to read file from path {}", path).as_str());
+        let data = std::fs::read(path);
+        if data.is_err() {
+            return Err(format!("failed to read file '{}'", path));
+        }
+        let data = data.unwrap();
 
         Self::from_bytes(data)
     }

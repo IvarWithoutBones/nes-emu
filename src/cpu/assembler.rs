@@ -35,6 +35,9 @@
 
 use crate::cpu::instructions::*;
 
+#[allow(dead_code)]
+
+
 pub fn run() {
     let instr = fetch_instruction("LDA").unwrap();
     let modes = get_modes_for_instr(instr);

@@ -5,7 +5,7 @@ mod cpu;
 use bus::Bus;
 use cartridge::Cartridge;
 use clap::Parser;
-use cpu::{assembler, CPU};
+use cpu::CPU;
 
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
@@ -17,20 +17,13 @@ struct Args {
     rom: String,
 }
 
-#[allow(unreachable_code)]
 fn main() {
-    assembler::run();
-
-    return;
-
     let args = Args::parse();
 
-    let cart = Cartridge::from_path(&args.rom);
-    if cart.is_err() {
-        println!("Failed to load ROM: {}", args.rom);
-        return;
-    }
-    let cart = cart.unwrap();
+    let cart = Cartridge::from_path(&args.rom).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    });
 
     let bus: Bus = Bus::new(cart, args.quiet);
     let mut cpu = CPU::new(bus);

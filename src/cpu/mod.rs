@@ -1,9 +1,11 @@
-mod instructions;
 pub mod assembler;
+mod instructions;
 
 use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
-use instructions::{execute_instruction, format_instruction, instruction_name, parse_instruction};
+use instructions::{
+    execute_instruction, format_instruction, instruction_name, parse_instruction, AdressingMode,
+};
 use std::fmt;
 
 bitflags! {
@@ -18,6 +20,12 @@ bitflags! {
         const BREAK2 =   0b0010_0000;
         const OVERFLOW = 0b0100_0000;
         const NEGATIVE = 0b1000_0000;
+    }
+}
+
+impl fmt::Display for CpuFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.bits() as u8)
     }
 }
 
@@ -48,7 +56,7 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
-        self.status = CpuFlags::empty();
+        self.status = CpuFlags::from_bits_truncate(0b100100);
         self.stack_pointer = CPU::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
@@ -56,12 +64,17 @@ impl CPU {
         self.program_counter = PROGRAM_ROM_START as u16;
     }
 
-    /*
-      Helpers
-    */
-
     pub const fn nth_bit(value: u8, n: u8) -> bool {
         value & (1 << n) != 0
+    }
+
+    pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
+        if condition {
+            let offset = mode.fetch_param_address(self);
+            return offset.wrapping_add(mode.opcode_len());
+        }
+        // TODO: move increment_pc()
+        self.program_counter + mode.opcode_len()
     }
 
     pub fn stack_push_byte(&mut self, data: u8) {
@@ -113,8 +126,8 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A: {}, X: {}, Y: {}, SP: {:#x}",
-            self.accumulator, self.register_x, self.register_y, self.stack_pointer
+            "A: {}, X: {}, Y: {}, P: {}, SP: {:#x}",
+            self.accumulator, self.register_x, self.register_y, self.status, self.stack_pointer
         )
     }
 }
