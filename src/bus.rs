@@ -19,9 +19,9 @@ pub trait Memory {
     }
 
     fn write_word(&mut self, address: u16, data: u16) {
-        let value = u16::to_le_bytes(data);
-        self.write_byte(address, value[0]);
-        self.write_byte(address + 1, value[1]);
+        for (i, val) in u16::to_le_bytes(data).iter().enumerate() {
+            self.write_byte((address as usize + i).try_into().unwrap(), *val);
+        }
     }
 }
 

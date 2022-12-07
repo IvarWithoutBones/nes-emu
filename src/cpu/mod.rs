@@ -88,13 +88,13 @@ impl CPU {
     }
 
     pub fn stack_push_word(&mut self, data: u16) {
-        let bytes = u16::to_le_bytes(data);
-        self.stack_push_byte(bytes[0]);
-        self.stack_push_byte(bytes[1]);
+        for byte in u16::to_le_bytes(data) {
+            self.stack_push_byte(byte);
+        }
     }
 
     pub fn stack_pop_word(&mut self) -> u16 {
-        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()])
+        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()]).to_be()
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
@@ -105,8 +105,8 @@ impl CPU {
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            let (instr, mode) =
-                parse_instruction(opcode).expect(format!("Invalid opcode {:#02x}", opcode).as_str());
+            let (instr, mode) = parse_instruction(opcode)
+                .expect(format!("Invalid opcode {:#02x}", opcode).as_str());
 
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
@@ -126,7 +126,7 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A: {:02X}, X: {:02X}, Y: {:02X}, P: {:02X}, SP: {:02x}",
+            "A: {:02X}, X: {:02X}, Y: {:02X}, P: {:02X}, SP: {:02X}",
             self.accumulator, self.register_x, self.register_y, self.status, self.stack_pointer
         )
     }
@@ -165,7 +165,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, true));
+                let mut cpu = CPU::new(Bus::new(cart, false));
                 cpu.run();
                 $callback(cpu);
             }
@@ -175,7 +175,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, true));
+                let mut cpu = CPU::new(Bus::new(cart, false));
                 $callback(&mut cpu);
             }
         };
@@ -184,7 +184,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let cart = Cartridge::new([0].to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, true));
+                let mut cpu = CPU::new(Bus::new(cart, false));
                 $callback(&mut cpu);
             }
         };
@@ -201,6 +201,37 @@ mod test {
     test_cpu!(test_jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
         assert_eq!(cpu.program_counter, 0x0010);
     });
+
+    test_cpu!(test_jsr, [0x20, 0x10, 0x00 /* JSR 0x0010 */], |cpu: CPU| {
+        assert_eq!(cpu.program_counter, 0x0010);
+    });
+
+    test_cpu!(
+        test_jsr_ldx,
+        [0x20, 0x53, 0x12 /* JSR 0x1253 */,],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x1253, 0xA2); // LDX
+            cpu.write_byte(0x1254, 0x23); // #0x23
+            cpu.run();
+            assert_eq!(cpu.program_counter, 0x1255);
+            assert_eq!(cpu.register_x, 0x23);
+        }
+    );
+
+    test_cpu!(
+        test_jsr_rts,
+        [0x20, 0x53, 0x12 /* JSR 0x1253 */,],
+        true,
+        |cpu: &mut CPU| {
+            cpu.write_byte(0x1253, 0xA0); // LDY
+            cpu.write_byte(0x1254, 0xFF); // #0xFF
+            cpu.write_byte(0x1255, 0x60); // RTS
+            cpu.run();
+            assert_eq!(cpu.program_counter, 0x8003);
+            assert_eq!(cpu.register_y, 0xFF);
+        }
+    );
 
     test_cpu!(
         test_jmp_indirect,

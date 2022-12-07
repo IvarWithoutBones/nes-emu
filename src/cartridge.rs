@@ -160,7 +160,7 @@ impl Cartridge {
         let mut program: Vec<u8> = vec![header, data].concat();
         let len = program.len();
         program.resize(Self::PROGRAM_ROM_PAGE_SIZE + len, 0xEA); // NOP
-        program[len + 1] = 0x00; // BRK
+        program[len] = 0x00; // BRK
         Self::from_bytes(program)
     }
 }
