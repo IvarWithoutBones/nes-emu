@@ -221,7 +221,6 @@ impl AdressingMode {
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
 pub const INSTRUCTIONS: [Instruction; 57] = [
     ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
-    ("NOP", opcodes::nop, &[(0xEA, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),
 
     ("BCS", opcodes::bcs, &[(0xB0, &AdressingMode::Relative)]),
@@ -255,6 +254,11 @@ pub const INSTRUCTIONS: [Instruction; 57] = [
     ("PLA", opcodes::pla, &[(0x68, &AdressingMode::Implied)]),
     ("TSX", opcodes::tsx, &[(0xBA, &AdressingMode::Implied)]),
     ("TXS", opcodes::txs, &[(0x9A, &AdressingMode::Implied)]),
+
+    ("NOP", opcodes::nop, &[
+        (0xEA, &AdressingMode::Implied),
+        (0x80, &AdressingMode::Implied)
+    ]),
 
     ("BIT", opcodes::bit, &[
         (0x24, &AdressingMode::ZeroPage),
@@ -462,10 +466,12 @@ mod opcodes {
 
     pub fn inx(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_x = cpu.register_x.wrapping_add(1);
+        cpu.update_zero_and_negative_flags(cpu.register_x);
         consume_opcode(cpu.program_counter, mode)
     }
     pub fn iny(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.register_y = cpu.register_y.wrapping_add(1);
+        cpu.update_zero_and_negative_flags(cpu.register_y);
         consume_opcode(cpu.program_counter, mode)
     }
 
@@ -479,9 +485,12 @@ mod opcodes {
         consume_opcode(cpu.program_counter, mode)
     }
 
-    pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) -> u16 {
-        cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
-        cpu.stack_pop_word()
+    pub fn rti(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        if !cpu.status.contains(CpuFlags::IRQ) {
+            cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+            return cpu.stack_pop_word();
+        }
+        consume_opcode(cpu.program_counter, mode)
     }
 
     pub fn adc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -489,8 +498,7 @@ mod opcodes {
         let value = cpu.read_byte(addr);
 
         let (data, overflow1) = cpu.accumulator.overflowing_add(value);
-        let (result, overflow2) =
-            data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
 
         cpu.status.set(CpuFlags::CARRY, overflow1 || overflow2);
         cpu.update_zero_and_negative_flags(result);
@@ -508,14 +516,13 @@ mod opcodes {
         let value = cpu.read_byte(addr);
 
         let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
-        let (result, overflow2) =
-            data.overflowing_sub(1 - cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_sub(!cpu.status.contains(CpuFlags::CARRY) as u8);
 
         cpu.status.set(CpuFlags::CARRY, !(overflow1 || overflow2));
         cpu.update_zero_and_negative_flags(result);
         cpu.status.set(
             CpuFlags::OVERFLOW,
-            (((cpu.accumulator ^ result) & (value ^ result)) & 0x80) != 0,
+            (((cpu.accumulator ^ result) & !(value ^ result)) & 0x80) != 0,
         );
 
         cpu.accumulator = result;

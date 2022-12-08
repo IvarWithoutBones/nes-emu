@@ -63,10 +63,17 @@ impl Memory for Bus {
             PROGRAM_ROM_START..=PROGRAM_ROM_END => self.read_program_rom(address),
 
             PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
-                todo!("PPU register read not implemented")
+                println!(
+                    "warning: unimplemented PPU register read at {:04X}",
+                    address
+                );
+                0
             }
 
-            _ => todo!("Unimplemented memory read at address {:#06X}", address),
+            _ => {
+                println!("warning: unimplemented read at {:04X}", address);
+                0
+            }
         }
     }
 
@@ -76,20 +83,19 @@ impl Memory for Bus {
                 self.cpu_ram[Self::to_cpu_ram_address(address)] = data;
             }
 
-            PROGRAM_ROM_START..=PROGRAM_ROM_END => panic!(
-                "Attempted to write to program ROM at address {:#06X}",
+            PROGRAM_ROM_START..=PROGRAM_ROM_END => println!(
+                "warning: attempted to write to program ROM at {:04X}",
                 address
             ),
 
             PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
-                todo!("PPU register write not implemented")
+                println!(
+                    "warning: unimplemented PPU register write at {:04X}",
+                    address
+                );
             }
 
-            _ => todo!(
-                "Unimplemented memory write at address {:#06X}: {}",
-                address,
-                data
-            ),
+            _ => println!("waring: unimplemented write at {:#06X}: {}", address, data),
         }
     }
 }

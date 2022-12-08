@@ -125,7 +125,6 @@ impl Cartridge {
         let character_rom_start = program_rom_start + program_rom_size;
 
         println!("cartridge metadata:");
-        println!("\t{} mirroring", header.mirroring);
         println!(
             "\t{} program ROM page(s), {} bytes",
             header.program_rom_pages, program_rom_size
@@ -134,6 +133,8 @@ impl Cartridge {
             "\t{} character ROM page(s), {} bytes",
             header.character_rom_pages, character_rom_size
         );
+        println!("\t{} mirroring", header.mirroring);
+        println!("\tmapper {}\n", header.mapper);
 
         Ok(Cartridge {
             program_rom: data[program_rom_start..(program_rom_start + program_rom_size)].to_vec(),

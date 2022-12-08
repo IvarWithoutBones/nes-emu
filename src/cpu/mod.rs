@@ -40,6 +40,7 @@ pub struct CPU {
 }
 
 impl CPU {
+    const RESET_VECTOR: u16 = 0xFFFC;
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
 
@@ -56,12 +57,15 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
-        self.status = CpuFlags::from_bits_truncate(0x24); // Hack to diff against nestest log
+        self.status = CpuFlags::from_bits_truncate(0x24); // Hack to diff against nestest log, should be 0x34
         self.stack_pointer = CPU::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
         self.register_y = 0;
-        self.program_counter = PROGRAM_ROM_START as u16;
+
+        // This is a hack, but starting at the beggining of prg rom makes nesdev get further
+        self.program_counter = PROGRAM_ROM_START;
+        // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
     pub const fn nth_bit(value: u8, n: u8) -> bool {
@@ -106,7 +110,7 @@ impl CPU {
         loop {
             let opcode = self.read_byte(self.program_counter);
             let (instr, mode) = parse_instruction(opcode)
-                .expect(format!("Invalid opcode {:#02x}", opcode).as_str());
+                .expect(format!("invalid opcode {:#02x} at PC {:04X}", opcode, self.program_counter).as_str());
 
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
