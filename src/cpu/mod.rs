@@ -64,8 +64,8 @@ impl CPU {
         self.register_y = 0;
 
         // This is a hack, but starting at the beggining of prg rom makes nesdev get further
-        self.program_counter = PROGRAM_ROM_START;
-        // self.program_counter = self.read_word(CPU::RESET_VECTOR);
+        // self.program_counter = PROGRAM_ROM_START;
+        self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
     pub const fn nth_bit(value: u8, n: u8) -> bool {

@@ -53,6 +53,10 @@ pub fn format_instruction(
     let mut bytes = String::from(format!("{:02X} ", cpu.read_byte(cpu.program_counter)));
     let mut args = String::new();
 
+    for i in 1..mode.opcode_len() {
+        bytes += &format!("{:02X} ", cpu.read_byte(cpu.program_counter + i as u16));
+    }
+
     if mode.has_arguments() {
         match mode {
             &AdressingMode::Immediate => {
@@ -67,19 +71,14 @@ pub fn format_instruction(
             }
             _ => args = format!("${:04X}", mode.fetch_param_address(cpu)),
         }
-
-        for i in 1..mode.opcode_len() {
-            bytes += &format!("{:02X} ", cpu.read_byte(cpu.program_counter + i as u16));
-        }
     }
 
     format!(
-        "{:04X} {1: <9}{2: <3} {3: <6} ({4: <3})",
+        "{:04X} {1: <9}{2: <3} {3: <6}",
         cpu.program_counter,
         bytes,
         instruction_name(instr),
-        args,
-        mode // TODO: remove this when I remember the assembly syntax
+        args
     )
 }
 
@@ -109,19 +108,19 @@ pub enum AdressingMode {
 impl fmt::Display for AdressingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Implied => write!(f, "Imp"),
-            Self::Relative => write!(f, "Rel"),
-            Self::Immediate => write!(f, "Imm"),
-            Self::Accumulator => write!(f, "Acc"),
-            Self::Indirect => write!(f, "Ind"),
-            Self::IndirectX => write!(f, "InX"),
-            Self::IndirectY => write!(f, "InY"),
-            Self::Absolute => write!(f, "Abs"),
-            Self::AbsoluteX => write!(f, "AbX"),
-            Self::AbsoluteY => write!(f, "AbY"),
-            Self::ZeroPage => write!(f, "Zer"),
-            Self::ZeroPageX => write!(f, "ZeX"),
-            Self::ZeroPageY => write!(f, "ZeY"),
+            Self::Implied => write!(f, "implied"),
+            Self::Relative => write!(f, "relative"),
+            Self::Immediate => write!(f, "immediate"),
+            Self::Accumulator => write!(f, "accumulator"),
+            Self::Indirect => write!(f, "indirect"),
+            Self::IndirectX => write!(f, "indirectX"),
+            Self::IndirectY => write!(f, "indirectY"),
+            Self::Absolute => write!(f, "absolute"),
+            Self::AbsoluteX => write!(f, "absoluteX"),
+            Self::AbsoluteY => write!(f, "absoluteY"),
+            Self::ZeroPage => write!(f, "zeropage"),
+            Self::ZeroPageX => write!(f, "zeropageX"),
+            Self::ZeroPageY => write!(f, "zeropageX"),
         }
     }
 }
@@ -485,12 +484,9 @@ mod opcodes {
         consume_opcode(cpu.program_counter, mode)
     }
 
-    pub fn rti(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        if !cpu.status.contains(CpuFlags::IRQ) {
-            cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
-            return cpu.stack_pop_word();
-        }
-        consume_opcode(cpu.program_counter, mode)
+    pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) -> u16 {
+        cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+        cpu.stack_pop_word()
     }
 
     pub fn adc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -711,14 +707,13 @@ mod opcodes {
     }
 
     pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = mode.fetch_param_address(cpu);
-
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
             cpu.accumulator >>= 1;
             cpu.accumulator
         } else {
+            let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
             value >>= 1;
@@ -731,14 +726,13 @@ mod opcodes {
     }
 
     pub fn asl(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = mode.fetch_param_address(cpu);
-
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
             cpu.accumulator <<= 1;
             cpu.accumulator
         } else {
+            let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
             value <<= 1;
@@ -751,14 +745,13 @@ mod opcodes {
     }
 
     pub fn ror(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = mode.fetch_param_address(cpu);
-
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
             cpu.accumulator = cpu.accumulator.rotate_right(1);
             cpu.accumulator
         } else {
+            let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
             value = value.rotate_right(1);
@@ -771,14 +764,13 @@ mod opcodes {
     }
 
     pub fn rol(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        let addr = mode.fetch_param_address(cpu);
-
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
             cpu.accumulator = cpu.accumulator.rotate_left(1);
             cpu.accumulator
         } else {
+            let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
             value = value.rotate_left(1);
