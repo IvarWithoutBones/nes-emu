@@ -92,13 +92,14 @@ impl CPU {
     }
 
     pub fn stack_push_word(&mut self, data: u16) {
-        for byte in u16::to_le_bytes(data) {
+        // I dont understand why pushing in big-endian order makes the value be read in little-endian?
+        for byte in u16::to_be_bytes(data) {
             self.stack_push_byte(byte);
         }
     }
 
     pub fn stack_pop_word(&mut self) -> u16 {
-        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()]).to_be()
+        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()])
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
@@ -109,8 +110,13 @@ impl CPU {
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            let (instr, mode) = parse_instruction(opcode)
-                .expect(format!("invalid opcode {:#02x} at PC {:04X}", opcode, self.program_counter).as_str());
+            let (instr, mode) = parse_instruction(opcode).expect(
+                format!(
+                    "invalid opcode {:#02x} at PC {:04X}",
+                    opcode, self.program_counter
+                )
+                .as_str(),
+            );
 
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
