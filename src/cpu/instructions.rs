@@ -57,19 +57,28 @@ pub fn format_instruction(
         bytes += &format!("{:02X} ", cpu.read_byte(cpu.program_counter + i as u16));
     }
 
-    if mode.has_arguments() {
-        match mode {
-            &AdressingMode::Immediate => {
-                args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu)));
+    match mode {
+        &AdressingMode::Immediate => {
+            args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu)));
+        }
+
+        &AdressingMode::Relative => {
+            // TODO: this is hacky, instruction seems to work fine though
+            args = format!("${:02X}", mode.fetch_param_address(cpu).wrapping_add(1));
+        }
+
+        &AdressingMode::ZeroPage => {
+            args = format!("${:02X}", mode.fetch_param_address(cpu));
+        }
+
+        &AdressingMode::Accumulator => {
+            args = "A".to_string();
+        }
+
+        _ => {
+            if mode.has_arguments() {
+                args = format!("${:04X}", mode.fetch_param_address(cpu))
             }
-            &AdressingMode::Relative => {
-                // TODO: this is hacky, instruction seems to work fine though
-                args = format!("${:02X}", mode.fetch_param_address(cpu).wrapping_add(1));
-            }
-            &AdressingMode::ZeroPage => {
-                args = format!("${:02X}", mode.fetch_param_address(cpu));
-            }
-            _ => args = format!("${:04X}", mode.fetch_param_address(cpu)),
         }
     }
 
@@ -78,7 +87,7 @@ pub fn format_instruction(
         cpu.program_counter,
         bytes,
         instruction_name(instr),
-        args
+        args,
     )
 }
 
@@ -140,19 +149,22 @@ impl AdressingMode {
 
             AdressingMode::Immediate
             | AdressingMode::Relative
-            | AdressingMode::Indirect
             | AdressingMode::IndirectX
             | AdressingMode::IndirectY
             | AdressingMode::ZeroPage
             | AdressingMode::ZeroPageX
             | AdressingMode::ZeroPageY => 2,
 
-            AdressingMode::Absolute | AdressingMode::AbsoluteX | AdressingMode::AbsoluteY => 3,
+            AdressingMode::Indirect
+            | AdressingMode::Absolute
+            | AdressingMode::AbsoluteX
+            | AdressingMode::AbsoluteY => 3,
         }
     }
 
     pub fn fetch_param_address(&self, cpu: &CPU) -> u16 {
         let after_opcode = cpu.program_counter.wrapping_add(1);
+
         match self {
             AdressingMode::Immediate => after_opcode,
             AdressingMode::Absolute => cpu.read_word(after_opcode),
@@ -179,32 +191,36 @@ impl AdressingMode {
                 .wrapping_add(cpu.register_y as u16),
 
             AdressingMode::Indirect => {
-                // TODO: ignoring page boundary bug
                 let ptr = cpu.read_word(after_opcode);
+                let low = cpu.read_byte(ptr as u16);
 
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
-                ])
+                // Accomodate for a hardware bug, the 6502 reference states the following:
+                //    "An original 6502 has does not correctly fetch the target address if the indirect vector
+                //    falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case
+                //    it fetches the LSB from $xxFF as expected but takes the MSB from $xx00"
+                let high = if ptr & 0x00FF != 0xFF {
+                    cpu.read_byte(ptr.wrapping_add(1))
+                } else {
+                    cpu.read_byte(ptr & 0xFF00)
+                };
+
+                u16::from_le_bytes([low, high])
             }
 
             AdressingMode::IndirectX => {
-                let ptr = cpu
-                    .read_word(after_opcode)
-                    .wrapping_add(cpu.register_x.into());
+                let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
 
                 u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
                 ])
             }
 
             AdressingMode::IndirectY => {
-                let ptr = cpu.read_word(after_opcode);
-
+                let ptr = cpu.read_byte(after_opcode);
                 u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte((ptr as u16).wrapping_add(1)),
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
                 ])
                 .wrapping_add(cpu.register_y as u16)
             }
@@ -255,8 +271,31 @@ pub const INSTRUCTIONS: [Instruction; 57] = [
     ("TXS", opcodes::txs, &[(0x9A, &AdressingMode::Implied)]),
 
     ("NOP", opcodes::nop, &[
+        (0x80, &AdressingMode::Immediate),
+        (0x0C, &AdressingMode::Absolute),
+        (0x1C, &AdressingMode::AbsoluteX),
+        (0x3C, &AdressingMode::AbsoluteX),
+        (0x5C, &AdressingMode::AbsoluteX),
+        (0x7C, &AdressingMode::AbsoluteX),
+        (0xDC, &AdressingMode::AbsoluteX),
+        (0xFC, &AdressingMode::AbsoluteX),
         (0xEA, &AdressingMode::Implied),
-        (0x80, &AdressingMode::Implied)
+        (0x1A, &AdressingMode::Implied),
+        (0x3A, &AdressingMode::Implied),
+        (0x5A, &AdressingMode::Implied),
+        (0x7A, &AdressingMode::Implied),
+        (0xDA, &AdressingMode::Implied),
+        (0xFA, &AdressingMode::Implied),
+        (0xFA, &AdressingMode::Implied),
+        (0x04, &AdressingMode::ZeroPage),
+        (0x44, &AdressingMode::ZeroPage),
+        (0x64, &AdressingMode::ZeroPage),
+        (0x14, &AdressingMode::ZeroPageX),
+        (0x34, &AdressingMode::ZeroPageX),
+        (0x54, &AdressingMode::ZeroPageX),
+        (0x74, &AdressingMode::ZeroPageX),
+        (0xD4, &AdressingMode::ZeroPageX),
+        (0xF4, &AdressingMode::ZeroPageX),
     ]),
 
     ("BIT", opcodes::bit, &[
@@ -486,6 +525,9 @@ mod opcodes {
 
     pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) -> u16 {
         cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
+        cpu.status.remove(CpuFlags::BREAK);
+        cpu.status.insert(CpuFlags::BREAK2);
         cpu.stack_pop_word()
     }
 
@@ -609,8 +651,8 @@ mod opcodes {
     }
 
     pub fn php(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         let mut status = cpu.status.clone();
+        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         status.insert(CpuFlags::BREAK);
         status.insert(CpuFlags::BREAK2);
         cpu.stack_push_byte(status.bits());
@@ -618,8 +660,8 @@ mod opcodes {
     }
 
     pub fn plp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+        // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         cpu.status.remove(CpuFlags::BREAK);
         cpu.status.insert(CpuFlags::BREAK2);
         consume_opcode(cpu.program_counter, mode)
@@ -734,6 +776,7 @@ mod opcodes {
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
+
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
             value <<= 1;
             cpu.write_byte(addr, value);
@@ -745,16 +788,20 @@ mod opcodes {
     }
 
     pub fn ror(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let rotate_right = |value: u8| (value >> 1) | ((carry as u8) << 7);
+
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
-            cpu.accumulator = cpu.accumulator.rotate_right(1);
+            cpu.accumulator = rotate_right(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
+
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
-            value = value.rotate_right(1);
+            value = rotate_right(value);
             cpu.write_byte(addr, value);
             value
         };
@@ -764,16 +811,20 @@ mod opcodes {
     }
 
     pub fn rol(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let rotate_left = |value: u8| (value << 1) | carry as u8;
+
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
                 .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
-            cpu.accumulator = cpu.accumulator.rotate_left(1);
+            cpu.accumulator = rotate_left(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
+
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
-            value = value.rotate_left(1);
+            value = rotate_left(value);
             cpu.write_byte(addr, value);
             value
         };

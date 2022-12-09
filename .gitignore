@@ -8,4 +8,6 @@
 /.envrc
 /.direnv
 
+# Emulator
 /roms
+*.log

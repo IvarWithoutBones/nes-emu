@@ -64,8 +64,8 @@ impl CPU {
         self.register_y = 0;
 
         // This is a hack, but starting at the beggining of prg rom makes nesdev get further
-        // self.program_counter = PROGRAM_ROM_START;
-        self.program_counter = self.read_word(CPU::RESET_VECTOR);
+        self.program_counter = PROGRAM_ROM_START;
+        // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
     pub const fn nth_bit(value: u8, n: u8) -> bool {
@@ -74,8 +74,9 @@ impl CPU {
 
     pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
         if condition {
+            // Both functions add one to the program counter, so we need to subtract. Kinda ugly
             let offset = mode.fetch_param_address(self);
-            return offset.wrapping_add(mode.opcode_len());
+            return offset.wrapping_add(mode.opcode_len() - 1);
         }
         // TODO: move increment_pc()
         self.program_counter + mode.opcode_len()
@@ -136,7 +137,7 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A: {:02X}, X: {:02X}, Y: {:02X}, P: {:02X}, SP: {:02X}",
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
             self.accumulator, self.register_x, self.register_y, self.status, self.stack_pointer
         )
     }
