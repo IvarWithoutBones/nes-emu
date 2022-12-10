@@ -166,14 +166,10 @@ impl AdressingMode {
         let after_opcode = cpu.program_counter.wrapping_add(1);
 
         match self {
-            AdressingMode::Immediate => after_opcode,
+            AdressingMode::Immediate | AdressingMode::Relative => after_opcode,
             AdressingMode::Absolute => cpu.read_word(after_opcode),
             AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
 
-            AdressingMode::Relative => {
-                // TODO: is this correct?
-                after_opcode.wrapping_add(cpu.read_byte(after_opcode) as u16)
-            }
             AdressingMode::ZeroPageX => {
                 cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16
             }

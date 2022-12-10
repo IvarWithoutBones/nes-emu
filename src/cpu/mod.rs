@@ -74,9 +74,14 @@ impl CPU {
 
     pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
         if condition {
-            // Both functions add one to the program counter, so we need to subtract. Kinda ugly
-            let offset = mode.fetch_param_address(self);
-            return offset.wrapping_add(mode.opcode_len() - 1);
+            let offset = self.read_byte(mode.fetch_param_address(self));
+
+            if offset < 0x7F {
+                return self.program_counter + mode.opcode_len() as u16 + offset as u16;
+            } else {
+                return (self.program_counter + mode.opcode_len() as u16)
+                    .wrapping_sub(offset.wrapping_neg() as u16);
+            }
         }
         // TODO: move increment_pc()
         self.program_counter + mode.opcode_len()
