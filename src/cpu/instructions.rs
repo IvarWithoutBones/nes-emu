@@ -230,7 +230,7 @@ impl AdressingMode {
 
 #[rustfmt::skip]
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
-pub const INSTRUCTIONS: [Instruction; 57] = [
+pub const INSTRUCTIONS: [Instruction; 65] = [
     ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),
 
@@ -335,6 +335,7 @@ pub const INSTRUCTIONS: [Instruction; 57] = [
 
     ("SBC", opcodes::sbc, &[
         (0xE9, &AdressingMode::Immediate),
+        (0xEB, &AdressingMode::Immediate), // Illegal
         (0xE5, &AdressingMode::ZeroPage),
         (0xF5, &AdressingMode::ZeroPageX),
         (0xED, &AdressingMode::Absolute),
@@ -480,6 +481,84 @@ pub const INSTRUCTIONS: [Instruction; 57] = [
         (0x94, &AdressingMode::ZeroPageX),
         (0x8C, &AdressingMode::Absolute),
     ]),
+
+    // Unofficial opcodes
+
+    ("LAX", opcodes::lax, &[
+        (0xA7, &AdressingMode::ZeroPage),
+        (0xB7, &AdressingMode::ZeroPageY),
+        (0xAF, &AdressingMode::Absolute),
+        (0xBF, &AdressingMode::AbsoluteY),
+        (0xA3, &AdressingMode::IndirectX),
+        (0xB3, &AdressingMode::IndirectY),
+    ]),
+
+    ("SAX", opcodes::sax, &[
+        (0x87, &AdressingMode::ZeroPage),
+        (0x97, &AdressingMode::ZeroPageY),
+        (0x8F, &AdressingMode::Absolute),
+        (0x83, &AdressingMode::IndirectX),
+    ]),
+
+    ("DCP", opcodes::dcp, &[
+        (0xC7, &AdressingMode::ZeroPage),
+        (0xD7, &AdressingMode::ZeroPageX),
+        (0xCF, &AdressingMode::Absolute),
+        (0xDF, &AdressingMode::AbsoluteX),
+        (0xDB, &AdressingMode::AbsoluteY),
+        (0xC3, &AdressingMode::IndirectX),
+        (0xD3, &AdressingMode::IndirectY),
+    ]),
+
+    ("ISB", opcodes::isb, &[
+        (0xE7, &AdressingMode::ZeroPage),
+        (0xF7, &AdressingMode::ZeroPageX),
+        (0xEF, &AdressingMode::Absolute),
+        (0xFF, &AdressingMode::AbsoluteX),
+        (0xFB, &AdressingMode::AbsoluteY),
+        (0xE3, &AdressingMode::IndirectX),
+        (0xF3, &AdressingMode::IndirectY),
+    ]),
+
+    ("SLO", opcodes::slo, &[
+        (0x07, &AdressingMode::ZeroPage),
+        (0x17, &AdressingMode::ZeroPageX),
+        (0x0F, &AdressingMode::Absolute),
+        (0x1F, &AdressingMode::AbsoluteX),
+        (0x1B, &AdressingMode::AbsoluteY),
+        (0x03, &AdressingMode::IndirectX),
+        (0x13, &AdressingMode::IndirectY),
+    ]),
+
+    ("RLA", opcodes::rla, &[
+        (0x27, &AdressingMode::ZeroPage),
+        (0x37, &AdressingMode::ZeroPageX),
+        (0x2F, &AdressingMode::Absolute),
+        (0x3F, &AdressingMode::AbsoluteX),
+        (0x3B, &AdressingMode::AbsoluteY),
+        (0x23, &AdressingMode::IndirectX),
+        (0x33, &AdressingMode::IndirectY),
+    ]),
+
+    ("SRE", opcodes::sre, &[
+        (0x47, &AdressingMode::ZeroPage),
+        (0x57, &AdressingMode::ZeroPageX),
+        (0x4F, &AdressingMode::Absolute),
+        (0x5F, &AdressingMode::AbsoluteX),
+        (0x5B, &AdressingMode::AbsoluteY),
+        (0x43, &AdressingMode::IndirectX),
+        (0x53, &AdressingMode::IndirectY),
+    ]),
+
+    ("RRA", opcodes::rra, &[
+        (0x67, &AdressingMode::ZeroPage),
+        (0x77, &AdressingMode::ZeroPageX),
+        (0x6F, &AdressingMode::Absolute),
+        (0x7F, &AdressingMode::AbsoluteX),
+        (0x7B, &AdressingMode::AbsoluteY),
+        (0x63, &AdressingMode::IndirectX),
+        (0x73, &AdressingMode::IndirectY),
+    ])
 ];
 
 mod opcodes {
@@ -511,7 +590,7 @@ mod opcodes {
 
     pub fn inc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr).wrapping_add(1); // Should this be a word?
+        let value = cpu.read_byte(addr).wrapping_add(1);
 
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
@@ -595,7 +674,7 @@ mod opcodes {
 
     pub fn dec(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr).wrapping_sub(1); // Should this be a word?
+        let value = cpu.read_byte(addr).wrapping_sub(1);
 
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
@@ -855,7 +934,6 @@ mod opcodes {
 
         cpu.accumulator |= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
-
         consume_opcode(cpu.program_counter, mode)
     }
 
@@ -927,6 +1005,130 @@ mod opcodes {
 
     pub fn txs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.stack_pointer = cpu.register_x;
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    // Unofficial opcodes
+
+    pub fn lax(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let value = cpu.read_byte(addr);
+
+        cpu.accumulator = value;
+        cpu.register_x = value;
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn sax(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let result = cpu.accumulator & cpu.register_x;
+
+        cpu.write_byte(addr, result);
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn dcp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let value = cpu.read_byte(addr).wrapping_sub(1);
+
+        cpu.write_byte(addr, value);
+        cpu.update_zero_and_negative_flags(value);
+
+        cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
+        // Subtract so that we set the ZERO flag if the values are equal
+        cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
+
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn isb(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let value = cpu.read_byte(addr).wrapping_add(1);
+
+        let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
+        let (result, overflow2) = data.overflowing_sub(!cpu.status.contains(CpuFlags::CARRY) as u8);
+
+        cpu.status.set(CpuFlags::CARRY, !(overflow1 || overflow2));
+        cpu.update_zero_and_negative_flags(result);
+        cpu.status.set(
+            CpuFlags::OVERFLOW,
+            (((cpu.accumulator ^ result) & !(value ^ result)) & 0x80) != 0,
+        );
+
+        cpu.accumulator = result;
+        cpu.write_byte(addr, value);
+
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn slo(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let mut value = cpu.read_byte(addr);
+
+        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        value <<= 1;
+
+        cpu.write_byte(addr, value);
+        cpu.accumulator |= value;
+
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn rla(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let mut value = cpu.read_byte(addr);
+
+        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let rotate_left = |value: u8| (value << 1) | carry as u8;
+
+        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        value = rotate_left(value);
+        cpu.write_byte(addr, value);
+
+        cpu.accumulator &= value;
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn sre(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let mut value = cpu.read_byte(addr);
+
+        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        value >>= 1;
+        cpu.write_byte(addr, value);
+
+        cpu.accumulator ^= value;
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn rra(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let mut value = cpu.read_byte(addr);
+
+        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let rotate_right = |value: u8| (value >> 1) | ((carry as u8) << 7);
+
+        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        value = rotate_right(value);
+        cpu.write_byte(addr, value);
+
+        let (data, overflow1) = cpu.accumulator.overflowing_add(value);
+        let (result, overflow2) = data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
+
+        cpu.status.set(CpuFlags::CARRY, overflow1 || overflow2);
+        cpu.update_zero_and_negative_flags(result);
+        cpu.status.set(
+            CpuFlags::OVERFLOW,
+            (((cpu.accumulator ^ result) & (value ^ result)) & 0x80) != 0,
+        );
+
+        cpu.accumulator = result;
         consume_opcode(cpu.program_counter, mode)
     }
 }
