@@ -230,7 +230,7 @@ impl AdressingMode {
 
 #[rustfmt::skip]
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
-pub const INSTRUCTIONS: [Instruction; 57] = [
+pub const INSTRUCTIONS: [Instruction; 58] = [
     ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),
 
@@ -480,6 +480,17 @@ pub const INSTRUCTIONS: [Instruction; 57] = [
         (0x94, &AdressingMode::ZeroPageX),
         (0x8C, &AdressingMode::Absolute),
     ]),
+
+    // Unofficial opcodes
+
+    ("LAX", opcodes::lax, &[
+        (0xA7, &AdressingMode::ZeroPage),
+        (0xB7, &AdressingMode::ZeroPageY),
+        (0xAF, &AdressingMode::Absolute),
+        (0xBF, &AdressingMode::AbsoluteY),
+        (0xA3, &AdressingMode::IndirectX),
+        (0xB3, &AdressingMode::IndirectY),
+    ])
 ];
 
 mod opcodes {
@@ -927,6 +938,17 @@ mod opcodes {
 
     pub fn txs(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         cpu.stack_pointer = cpu.register_x;
+        consume_opcode(cpu.program_counter, mode)
+    }
+
+    pub fn lax(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
+        let addr = mode.fetch_param_address(cpu);
+        let value = cpu.read_byte(addr);
+
+        cpu.accumulator = value;
+        cpu.register_x = value;
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+
         consume_opcode(cpu.program_counter, mode)
     }
 }
