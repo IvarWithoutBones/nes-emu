@@ -1,5 +1,6 @@
 use crate::bus::Memory;
 use crate::cpu::{CpuFlags, CPU};
+use crate::util;
 use std::fmt;
 
 pub type Instruction = (
@@ -758,13 +759,13 @@ mod opcodes {
     pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
+                .set(CpuFlags::CARRY, util::nth_bit(cpu.accumulator, 0));
             cpu.accumulator >>= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+            cpu.status.set(CpuFlags::CARRY, util::nth_bit(value, 0));
             value >>= 1;
             cpu.write_byte(addr, value);
             value
@@ -777,14 +778,14 @@ mod opcodes {
     pub fn asl(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
+                .set(CpuFlags::CARRY, util::nth_bit(cpu.accumulator, 7));
             cpu.accumulator <<= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+            cpu.status.set(CpuFlags::CARRY, util::nth_bit(value, 7));
             value <<= 1;
             cpu.write_byte(addr, value);
             value
@@ -800,14 +801,14 @@ mod opcodes {
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
+                .set(CpuFlags::CARRY, util::nth_bit(cpu.accumulator, 0));
             cpu.accumulator = rotate_right(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+            cpu.status.set(CpuFlags::CARRY, util::nth_bit(value, 0));
             value = rotate_right(value);
             cpu.write_byte(addr, value);
             value
@@ -823,14 +824,14 @@ mod opcodes {
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
+                .set(CpuFlags::CARRY, util::nth_bit(cpu.accumulator, 7));
             cpu.accumulator = rotate_left(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu);
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+            cpu.status.set(CpuFlags::CARRY, util::nth_bit(value, 7));
             value = rotate_left(value);
             cpu.write_byte(addr, value);
             value
@@ -924,8 +925,8 @@ mod opcodes {
 
         cpu.status
             .set(CpuFlags::ZERO, (cpu.accumulator & value) == 0);
-        cpu.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
-        cpu.status.set(CpuFlags::OVERFLOW, CPU::nth_bit(value, 6));
+        cpu.status.set(CpuFlags::NEGATIVE, util::nth_bit(value, 7));
+        cpu.status.set(CpuFlags::OVERFLOW, util::nth_bit(value, 6));
 
         consume_opcode(cpu.program_counter, mode)
     }

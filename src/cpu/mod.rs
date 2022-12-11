@@ -1,7 +1,8 @@
 pub mod assembler;
 mod instructions;
+pub mod decode;
 
-use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
+use crate::{bus::{Bus, Memory, PROGRAM_ROM_START}, util};
 use bitflags::bitflags;
 use instructions::{
     execute_instruction, format_instruction, instruction_name, parse_instruction, AdressingMode,
@@ -68,10 +69,6 @@ impl CPU {
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
-    pub const fn nth_bit(value: u8, n: u8) -> bool {
-        value & (1 << n) != 0
-    }
-
     pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
         if condition {
             let offset = self.read_byte(mode.fetch_param_address(self));
@@ -109,7 +106,7 @@ impl CPU {
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
-        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
+        self.status.set(CpuFlags::NEGATIVE, util::nth_bit(value, 7));
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
@@ -166,14 +163,14 @@ mod test {
     #[test]
     fn test_nth_bit() {
         let value = 0b1010_1010;
-        assert_eq!(CPU::nth_bit(value, 0), false);
-        assert_eq!(CPU::nth_bit(value, 1), true);
-        assert_eq!(CPU::nth_bit(value, 2), false);
-        assert_eq!(CPU::nth_bit(value, 3), true);
-        assert_eq!(CPU::nth_bit(value, 4), false);
-        assert_eq!(CPU::nth_bit(value, 5), true);
-        assert_eq!(CPU::nth_bit(value, 6), false);
-        assert_eq!(CPU::nth_bit(value, 7), true);
+        assert_eq!(util::nth_bit(value, 0), false);
+        assert_eq!(util::nth_bit(value, 1), true);
+        assert_eq!(util::nth_bit(value, 2), false);
+        assert_eq!(util::nth_bit(value, 3), true);
+        assert_eq!(util::nth_bit(value, 4), false);
+        assert_eq!(util::nth_bit(value, 5), true);
+        assert_eq!(util::nth_bit(value, 6), false);
+        assert_eq!(util::nth_bit(value, 7), true);
     }
 
     macro_rules! test_cpu {
