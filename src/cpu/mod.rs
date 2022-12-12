@@ -1,12 +1,14 @@
 pub mod assembler;
 mod instructions;
 
-use crate::bus::{Bus, Memory, PROGRAM_ROM_START};
+use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
 use instructions::{
     execute_instruction, format_instruction, instruction_name, parse_instruction, AdressingMode,
 };
 use std::fmt;
+
+use self::instructions::instruction_cycles;
 
 bitflags! {
     #[rustfmt::skip]
@@ -64,7 +66,7 @@ impl CPU {
         self.register_y = 0;
 
         // This is a hack, but starting at the beggining of prg rom makes nesdev get further
-        self.program_counter = PROGRAM_ROM_START;
+        self.program_counter = 0xC000;
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
@@ -124,6 +126,10 @@ impl CPU {
                 .as_str(),
             );
 
+            let extra_cycles =
+                instruction_cycles(instr, mode).expect("failed to get cycles for instruction");
+            self.tick(extra_cycles as u64);
+
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
                 println!("{0: <33}\t{1:}", instr_str, self);
@@ -142,8 +148,13 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X}",
-            self.accumulator, self.register_x, self.register_y, self.status, self.stack_pointer
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
+            self.accumulator,
+            self.register_x,
+            self.register_y,
+            self.status,
+            self.stack_pointer,
+            self.get_cycles()
         )
     }
 }
@@ -155,6 +166,16 @@ impl Memory for CPU {
 
     fn write_byte(&mut self, address: u16, data: u8) {
         self.bus.write_byte(address, data)
+    }
+}
+
+impl Clock for CPU {
+    fn tick_internal(&mut self, cycles: u64) {
+        self.bus.tick_internal(cycles);
+    }
+
+    fn get_cycles(&self) -> u64 {
+        self.bus.get_cycles()
     }
 }
 

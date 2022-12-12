@@ -10,6 +10,16 @@ const CPU_RAM_MIRROR_END: u16 = 0x1FFF;
 const PPU_REGISTERS: u16 = 0x2000;
 const PPU_REGISTERS_MIRROR_END: u16 = 0x3FFF;
 
+pub trait Clock {
+    fn tick_internal(&mut self, cycles: u64);
+    fn get_cycles(&self) -> u64;
+
+    const MULTIPLIER: u64 = 1;
+    fn tick(&mut self, cycles: u64) {
+        self.tick_internal(cycles * Self::MULTIPLIER);
+    }
+}
+
 pub trait Memory {
     fn read_byte(&self, address: u16) -> u8;
     fn write_byte(&mut self, address: u16, data: u8);
@@ -28,6 +38,7 @@ pub trait Memory {
 pub struct Bus {
     pub cartridge: Cartridge,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
+    pub cycles: u64,
     // This is convenient as the bus is the middle man between other components
     pub quiet: bool,
 }
@@ -36,6 +47,7 @@ impl Bus {
     pub fn new(cartridge: Cartridge, quiet: bool) -> Self {
         Bus {
             cpu_ram: [0; CPU_RAM_SIZE],
+            cycles: 0,
             cartridge,
             quiet,
         }
@@ -97,5 +109,15 @@ impl Memory for Bus {
 
             _ => println!("waring: unimplemented write at {:#06X}: {}", address, data),
         }
+    }
+}
+
+impl Clock for Bus {
+    fn tick_internal(&mut self, cycles: u64) {
+        self.cycles += cycles;
+    }
+
+    fn get_cycles(&self) -> u64 {
+        self.cycles
     }
 }

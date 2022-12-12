@@ -5,16 +5,25 @@ use std::fmt;
 pub type Instruction = (
     &'static str,
     fn(cpu: &mut CPU, mode: &AdressingMode) -> u16,
-    &'static [(u8, &'static AdressingMode)],
+    &'static [(u8, u8, &'static AdressingMode)],
 );
 
 /// Retrieve an instruction based on an identifier
 pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'static AdressingMode)> {
     for instr in INSTRUCTIONS.iter() {
-        for (opcode, mode) in instr.2 {
+        for (opcode, _, mode) in instr.2 {
             if *opcode == identifier {
                 return Some((instr, mode));
             }
+        }
+    }
+    None
+}
+
+pub fn instruction_cycles(instr: &'static Instruction, mode: &'static AdressingMode) -> Option<u8> {
+    for (_, cycles, m) in instr.2 {
+        if *m == mode {
+            return Some(*cycles);
         }
     }
     None
@@ -30,19 +39,6 @@ pub fn execute_instruction(
 
 pub fn instruction_name(instr: &'static Instruction) -> &'static str {
     instr.0
-}
-
-#[allow(dead_code)]
-pub fn instruction_identifier(
-    instr: &'static Instruction,
-    mode: &'static AdressingMode,
-) -> Option<u8> {
-    for (opcode, m) in instr.2 {
-        if m == &mode {
-            return Some(*opcode);
-        }
-    }
-    None
 }
 
 pub fn format_instruction(
@@ -230,334 +226,345 @@ impl AdressingMode {
 
 #[rustfmt::skip]
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
-pub const INSTRUCTIONS: [Instruction; 65] = [
-    ("BRK", opcodes::brk, &[(0x00, &AdressingMode::Implied)]),
-    ("RTI", opcodes::rti, &[(0x40, &AdressingMode::Implied)]),
+pub const INSTRUCTIONS: [Instruction; 64] = [
+    ("BRK", opcodes::brk, &[(0x00, 7, &AdressingMode::Implied)]),
+    ("RTI", opcodes::rti, &[(0x40, 6, &AdressingMode::Implied)]),
 
-    ("BCS", opcodes::bcs, &[(0xB0, &AdressingMode::Relative)]),
-    ("BCC", opcodes::bcc, &[(0x90, &AdressingMode::Relative)]),
-    ("BEQ", opcodes::beq, &[(0xF0, &AdressingMode::Relative)]),
-    ("BNE", opcodes::bne, &[(0xD0, &AdressingMode::Relative)]),
-    ("BMI", opcodes::bmi, &[(0x30, &AdressingMode::Relative)]),
-    ("BPL", opcodes::bpl, &[(0x10, &AdressingMode::Relative)]),
-    ("BVS", opcodes::bvs, &[(0x70, &AdressingMode::Relative)]),
-    ("BVC", opcodes::bvc, &[(0x50, &AdressingMode::Relative)]),
+    // TODO: page boundary cycles
+    ("BCS", opcodes::bcs, &[(0xB0, 2, &AdressingMode::Relative)]),
+    ("BCC", opcodes::bcc, &[(0x90, 2, &AdressingMode::Relative)]),
+    ("BEQ", opcodes::beq, &[(0xF0, 2, &AdressingMode::Relative)]),
+    ("BNE", opcodes::bne, &[(0xD0, 2, &AdressingMode::Relative)]),
+    ("BMI", opcodes::bmi, &[(0x30, 2, &AdressingMode::Relative)]),
+    ("BPL", opcodes::bpl, &[(0x10, 2, &AdressingMode::Relative)]),
+    ("BVS", opcodes::bvs, &[(0x70, 2, &AdressingMode::Relative)]),
+    ("BVC", opcodes::bvc, &[(0x50, 2, &AdressingMode::Relative)]),
 
-    ("CLV", opcodes::clv, &[(0xB8, &AdressingMode::Implied)]),
-    ("CLC", opcodes::clc, &[(0x18, &AdressingMode::Implied)]),
-    ("CLD", opcodes::cld, &[(0xD8, &AdressingMode::Implied)]),
-    ("CLI", opcodes::cli, &[(0x58, &AdressingMode::Implied)]),
-    ("SEC", opcodes::sec, &[(0x38, &AdressingMode::Implied)]),
-    ("SED", opcodes::sed, &[(0xF8, &AdressingMode::Implied)]),
-    ("SEI", opcodes::sei, &[(0x78, &AdressingMode::Implied)]),
+    ("CLV", opcodes::clv, &[(0xB8, 2, &AdressingMode::Implied)]),
+    ("CLC", opcodes::clc, &[(0x18, 2, &AdressingMode::Implied)]),
+    ("CLD", opcodes::cld, &[(0xD8, 2, &AdressingMode::Implied)]),
+    ("CLI", opcodes::cli, &[(0x58, 2, &AdressingMode::Implied)]),
+    ("SEC", opcodes::sec, &[(0x38, 2, &AdressingMode::Implied)]),
+    ("SED", opcodes::sed, &[(0xF8, 2, &AdressingMode::Implied)]),
+    ("SEI", opcodes::sei, &[(0x78, 2, &AdressingMode::Implied)]),
 
-    ("TAX", opcodes::tax, &[(0xAA, &AdressingMode::Implied)]),
-    ("TAY", opcodes::tay, &[(0xA8, &AdressingMode::Implied)]),
-    ("TXA", opcodes::txa, &[(0x8A, &AdressingMode::Implied)]),
-    ("TYA", opcodes::tya, &[(0x98, &AdressingMode::Implied)]),
+    ("TAX", opcodes::tax, &[(0xAA, 2, &AdressingMode::Implied)]),
+    ("TAY", opcodes::tay, &[(0xA8, 2, &AdressingMode::Implied)]),
+    ("TXA", opcodes::txa, &[(0x8A, 2, &AdressingMode::Implied)]),
+    ("TYA", opcodes::tya, &[(0x98, 2, &AdressingMode::Implied)]),
 
-    ("JSR", opcodes::jsr, &[(0x20, &AdressingMode::Absolute)]),
-    ("RTS", opcodes::rts, &[(0x60, &AdressingMode::Implied)]),
-    ("PHP", opcodes::php, &[(0x08, &AdressingMode::Implied)]),
-    ("PLP", opcodes::plp, &[(0x28, &AdressingMode::Implied)]),
-    ("PLP", opcodes::plp, &[(0x28, &AdressingMode::Implied)]),
-    ("PHA", opcodes::pha, &[(0x48, &AdressingMode::Implied)]),
-    ("PLA", opcodes::pla, &[(0x68, &AdressingMode::Implied)]),
-    ("TSX", opcodes::tsx, &[(0xBA, &AdressingMode::Implied)]),
-    ("TXS", opcodes::txs, &[(0x9A, &AdressingMode::Implied)]),
+    ("JSR", opcodes::jsr, &[(0x20, 6, &AdressingMode::Absolute)]),
+    ("RTS", opcodes::rts, &[(0x60, 6, &AdressingMode::Implied)]),
+    ("PHP", opcodes::php, &[(0x08, 3, &AdressingMode::Implied)]),
+    ("PLP", opcodes::plp, &[(0x28, 4, &AdressingMode::Implied)]),
+    ("PHA", opcodes::pha, &[(0x48, 3, &AdressingMode::Implied)]),
+    ("PLA", opcodes::pla, &[(0x68, 4, &AdressingMode::Implied)]),
+    ("TSX", opcodes::tsx, &[(0xBA, 2, &AdressingMode::Implied)]),
+    ("TXS", opcodes::txs, &[(0x9A, 2, &AdressingMode::Implied)]),
 
+    // TODO: page boundary cycles
     ("NOP", opcodes::nop, &[
-        (0x80, &AdressingMode::Immediate),
-        (0x0C, &AdressingMode::Absolute),
-        (0x1C, &AdressingMode::AbsoluteX),
-        (0x3C, &AdressingMode::AbsoluteX),
-        (0x5C, &AdressingMode::AbsoluteX),
-        (0x7C, &AdressingMode::AbsoluteX),
-        (0xDC, &AdressingMode::AbsoluteX),
-        (0xFC, &AdressingMode::AbsoluteX),
-        (0xEA, &AdressingMode::Implied),
-        (0x1A, &AdressingMode::Implied),
-        (0x3A, &AdressingMode::Implied),
-        (0x5A, &AdressingMode::Implied),
-        (0x7A, &AdressingMode::Implied),
-        (0xDA, &AdressingMode::Implied),
-        (0xFA, &AdressingMode::Implied),
-        (0xFA, &AdressingMode::Implied),
-        (0x04, &AdressingMode::ZeroPage),
-        (0x44, &AdressingMode::ZeroPage),
-        (0x64, &AdressingMode::ZeroPage),
-        (0x14, &AdressingMode::ZeroPageX),
-        (0x34, &AdressingMode::ZeroPageX),
-        (0x54, &AdressingMode::ZeroPageX),
-        (0x74, &AdressingMode::ZeroPageX),
-        (0xD4, &AdressingMode::ZeroPageX),
-        (0xF4, &AdressingMode::ZeroPageX),
+        (0x80, 2, &AdressingMode::Immediate),
+        (0x0C, 4, &AdressingMode::Absolute),
+        (0x1C, 4, &AdressingMode::AbsoluteX),
+        (0x3C, 4, &AdressingMode::AbsoluteX),
+        (0x5C, 4, &AdressingMode::AbsoluteX),
+        (0x7C, 4, &AdressingMode::AbsoluteX),
+        (0xDC, 4, &AdressingMode::AbsoluteX),
+        (0xFC, 2, &AdressingMode::AbsoluteX),
+        (0xEA, 2, &AdressingMode::Implied),
+        (0x1A, 2, &AdressingMode::Implied),
+        (0x3A, 2, &AdressingMode::Implied),
+        (0x5A, 2, &AdressingMode::Implied),
+        (0x7A, 2, &AdressingMode::Implied),
+        (0xDA, 2, &AdressingMode::Implied),
+        (0xFA, 2, &AdressingMode::Implied),
+        (0xFA, 2, &AdressingMode::Implied),
+        (0x04, 3, &AdressingMode::ZeroPage),
+        (0x44, 3, &AdressingMode::ZeroPage),
+        (0x64, 3, &AdressingMode::ZeroPage),
+        (0x14, 4, &AdressingMode::ZeroPageX),
+        (0x34, 4, &AdressingMode::ZeroPageX),
+        (0x54, 4, &AdressingMode::ZeroPageX),
+        (0x74, 4, &AdressingMode::ZeroPageX),
+        (0xD4, 4, &AdressingMode::ZeroPageX),
+        (0xF4, 4, &AdressingMode::ZeroPageX),
     ]),
 
     ("BIT", opcodes::bit, &[
-        (0x24, &AdressingMode::ZeroPage),
-        (0x2C, &AdressingMode::Absolute),
+        (0x24, 3, &AdressingMode::ZeroPage),
+        (0x2C, 4, &AdressingMode::Absolute),
     ]),
 
     ("JMP",opcodes::jmp, &[
-        (0x4C, &AdressingMode::Absolute),
-        (0x6C, &AdressingMode::Indirect),
+        (0x4C, 3, &AdressingMode::Absolute),
+        (0x6C, 5, &AdressingMode::Indirect),
     ]),
 
-    ("INX", opcodes::inx, &[(0xE8, &AdressingMode::Implied)]),
-    ("INY", opcodes::iny, &[(0xC8, &AdressingMode::Implied)]),
+    ("INX", opcodes::inx, &[(0xE8, 2, &AdressingMode::Implied)]),
+    ("INY", opcodes::iny, &[(0xC8, 2, &AdressingMode::Implied)]),
     ("INC", opcodes::inc, &[
-        (0xE6, &AdressingMode::ZeroPage),
-        (0xF6, &AdressingMode::ZeroPageX),
-        (0xEE, &AdressingMode::Absolute),
-        (0xFE, &AdressingMode::AbsoluteX),
+        (0xE6, 5, &AdressingMode::ZeroPage),
+        (0xF6, 6, &AdressingMode::ZeroPageX),
+        (0xEE, 6, &AdressingMode::Absolute),
+        (0xFE, 7, &AdressingMode::AbsoluteX),
     ]),
 
-    ("DEX", opcodes::dex, &[(0xCA, &AdressingMode::Implied)]),
-    ("DEY", opcodes::dey, &[(0x88, &AdressingMode::Implied)]),
+    ("DEX", opcodes::dex, &[(0xCA, 2, &AdressingMode::Implied)]),
+    ("DEY", opcodes::dey, &[(0x88, 2, &AdressingMode::Implied)]),
     ("DEC", opcodes::dec, &[
-        (0xC6, &AdressingMode::ZeroPage),
-        (0xD6, &AdressingMode::ZeroPageX),
-        (0xCE, &AdressingMode::Absolute),
-        (0xDE, &AdressingMode::AbsoluteX),
+        (0xC6, 5, &AdressingMode::ZeroPage),
+        (0xD6, 6, &AdressingMode::ZeroPageX),
+        (0xCE, 6, &AdressingMode::Absolute),
+        (0xDE, 7, &AdressingMode::AbsoluteX),
     ]),
 
+    // TODO: page boundary cycles
     ("ADC", opcodes::adc, &[
-        (0x69, &AdressingMode::Immediate),
-        (0x65, &AdressingMode::ZeroPage),
-        (0x75, &AdressingMode::ZeroPageX),
-        (0x6D, &AdressingMode::Absolute),
-        (0x7D, &AdressingMode::AbsoluteX),
-        (0x79, &AdressingMode::AbsoluteY),
-        (0x61, &AdressingMode::IndirectX),
-        (0x71, &AdressingMode::IndirectY),
+        (0x69, 2, &AdressingMode::Immediate),
+        (0x65, 3, &AdressingMode::ZeroPage),
+        (0x75, 4, &AdressingMode::ZeroPageX),
+        (0x6D, 4, &AdressingMode::Absolute),
+        (0x7D, 4, &AdressingMode::AbsoluteX),
+        (0x79, 4, &AdressingMode::AbsoluteY),
+        (0x61, 6, &AdressingMode::IndirectX),
+        (0x71, 5, &AdressingMode::IndirectY),
     ]),
 
+    // TODO: page boundary cycles
     ("SBC", opcodes::sbc, &[
-        (0xE9, &AdressingMode::Immediate),
-        (0xEB, &AdressingMode::Immediate), // Illegal
-        (0xE5, &AdressingMode::ZeroPage),
-        (0xF5, &AdressingMode::ZeroPageX),
-        (0xED, &AdressingMode::Absolute),
-        (0xFD, &AdressingMode::AbsoluteX),
-        (0xF9, &AdressingMode::AbsoluteY),
-        (0xE1, &AdressingMode::IndirectX),
-        (0xF1, &AdressingMode::IndirectY),
+        (0xE9, 2, &AdressingMode::Immediate),
+        (0xEB, 2, &AdressingMode::Immediate), // Undocumented
+        (0xE5, 3, &AdressingMode::ZeroPage),
+        (0xF5, 4, &AdressingMode::ZeroPageX),
+        (0xED, 4, &AdressingMode::Absolute),
+        (0xFD, 4, &AdressingMode::AbsoluteX),
+        (0xF9, 4, &AdressingMode::AbsoluteY),
+        (0xE1, 6, &AdressingMode::IndirectX),
+        (0xF1, 5, &AdressingMode::IndirectY),
     ]),
 
     ("LSR", opcodes::lsr, &[
-        (0x4A, &AdressingMode::Accumulator),
-        (0x46, &AdressingMode::ZeroPage),
-        (0x56, &AdressingMode::ZeroPageX),
-        (0x4E, &AdressingMode::Absolute),
-        (0x5E, &AdressingMode::AbsoluteX),
+        (0x4A, 2, &AdressingMode::Accumulator),
+        (0x46, 5, &AdressingMode::ZeroPage),
+        (0x56, 6, &AdressingMode::ZeroPageX),
+        (0x4E, 6, &AdressingMode::Absolute),
+        (0x5E, 7, &AdressingMode::AbsoluteX),
     ]),
 
     ("ASL", opcodes::asl, &[
-        (0x0A, &AdressingMode::Accumulator),
-        (0x06, &AdressingMode::ZeroPage),
-        (0x16, &AdressingMode::ZeroPageX),
-        (0x0E, &AdressingMode::Absolute),
-        (0x1E, &AdressingMode::AbsoluteX),
+        (0x0A, 2, &AdressingMode::Accumulator),
+        (0x06, 5, &AdressingMode::ZeroPage),
+        (0x16, 6, &AdressingMode::ZeroPageX),
+        (0x0E, 6, &AdressingMode::Absolute),
+        (0x1E, 7, &AdressingMode::AbsoluteX),
     ]),
 
     ("ROL", opcodes::rol, &[
-        (0x2A, &AdressingMode::Accumulator),
-        (0x26, &AdressingMode::ZeroPage),
-        (0x36, &AdressingMode::ZeroPageX),
-        (0x2E, &AdressingMode::Absolute),
-        (0x3E, &AdressingMode::AbsoluteX),
+        (0x2A, 2, &AdressingMode::Accumulator),
+        (0x26, 5, &AdressingMode::ZeroPage),
+        (0x36, 6, &AdressingMode::ZeroPageX),
+        (0x2E, 6, &AdressingMode::Absolute),
+        (0x3E, 7, &AdressingMode::AbsoluteX),
     ]),
 
     ("ROR", opcodes::ror, &[
-        (0x6A, &AdressingMode::Accumulator),
-        (0x66, &AdressingMode::ZeroPage),
-        (0x76, &AdressingMode::ZeroPageX),
-        (0x6E, &AdressingMode::Absolute),
-        (0x7E, &AdressingMode::AbsoluteX),
+        (0x6A, 2, &AdressingMode::Accumulator),
+        (0x66, 5, &AdressingMode::ZeroPage),
+        (0x76, 6, &AdressingMode::ZeroPageX),
+        (0x6E, 6, &AdressingMode::Absolute),
+        (0x7E, 7, &AdressingMode::AbsoluteX),
     ]),
 
+    // TODO: page boundary cycles
     ("AND", opcodes::and, &[
-        (0x29, &AdressingMode::Immediate),
-        (0x25, &AdressingMode::ZeroPage),
-        (0x35, &AdressingMode::ZeroPageX),
-        (0x2D, &AdressingMode::Absolute),
-        (0x3D, &AdressingMode::AbsoluteX),
-        (0x39, &AdressingMode::AbsoluteY),
-        (0x21, &AdressingMode::IndirectX),
-        (0x31, &AdressingMode::IndirectY),
+        (0x29, 2, &AdressingMode::Immediate),
+        (0x25, 3, &AdressingMode::ZeroPage),
+        (0x35, 4, &AdressingMode::ZeroPageX),
+        (0x2D, 4, &AdressingMode::Absolute),
+        (0x3D, 4, &AdressingMode::AbsoluteX),
+        (0x39, 4, &AdressingMode::AbsoluteY),
+        (0x21, 6, &AdressingMode::IndirectX),
+        (0x31, 5, &AdressingMode::IndirectY),
     ]),
 
+    // TODO: page boundary cycles
     ("EOR", opcodes::eor, &[
-        (0x49, &AdressingMode::Immediate),
-        (0x45, &AdressingMode::ZeroPage),
-        (0x55, &AdressingMode::ZeroPageX),
-        (0x4D, &AdressingMode::Absolute),
-        (0x5D, &AdressingMode::AbsoluteX),
-        (0x59, &AdressingMode::AbsoluteY),
-        (0x41, &AdressingMode::IndirectX),
-        (0x51, &AdressingMode::IndirectY),
+        (0x49, 2, &AdressingMode::Immediate),
+        (0x45, 3, &AdressingMode::ZeroPage),
+        (0x55, 4, &AdressingMode::ZeroPageX),
+        (0x4D, 4, &AdressingMode::Absolute),
+        (0x5D, 4, &AdressingMode::AbsoluteX),
+        (0x59, 4, &AdressingMode::AbsoluteY),
+        (0x41, 6, &AdressingMode::IndirectX),
+        (0x51, 5, &AdressingMode::IndirectY),
     ]),
 
+    // TODO: page boundary cycles
     ("ORA", opcodes::ora, &[
-        (0x09, &AdressingMode::Immediate),
-        (0x05, &AdressingMode::ZeroPage),
-        (0x15, &AdressingMode::ZeroPageX),
-        (0x0D, &AdressingMode::Absolute),
-        (0x1D, &AdressingMode::AbsoluteX),
-        (0x19, &AdressingMode::AbsoluteY),
-        (0x01, &AdressingMode::IndirectX),
-        (0x11, &AdressingMode::IndirectY),
+        (0x09, 2, &AdressingMode::Immediate),
+        (0x05, 3, &AdressingMode::ZeroPage),
+        (0x15, 4, &AdressingMode::ZeroPageX),
+        (0x0D, 4, &AdressingMode::Absolute),
+        (0x1D, 4, &AdressingMode::AbsoluteX),
+        (0x19, 4, &AdressingMode::AbsoluteY),
+        (0x01, 6, &AdressingMode::IndirectX),
+        (0x11, 5, &AdressingMode::IndirectY),
     ]),
 
+    // TODO: page boundary cycles
     ("CMP", opcodes::cmp, &[
-        (0xC9, &AdressingMode::Immediate),
-        (0xC5, &AdressingMode::ZeroPage),
-        (0xD5, &AdressingMode::ZeroPageX),
-        (0xCD, &AdressingMode::Absolute),
-        (0xDD, &AdressingMode::AbsoluteX),
-        (0xD9, &AdressingMode::AbsoluteY),
-        (0xC1, &AdressingMode::IndirectX),
-        (0xD1, &AdressingMode::IndirectY),
+        (0xC9, 2, &AdressingMode::Immediate),
+        (0xC5, 3, &AdressingMode::ZeroPage),
+        (0xD5, 4, &AdressingMode::ZeroPageX),
+        (0xCD, 4, &AdressingMode::Absolute),
+        (0xDD, 4, &AdressingMode::AbsoluteX),
+        (0xD9, 4, &AdressingMode::AbsoluteY),
+        (0xC1, 6, &AdressingMode::IndirectX),
+        (0xD1, 5, &AdressingMode::IndirectY),
     ]),
 
     ("CPX", opcodes::cpx, &[
-        (0xE0, &AdressingMode::Immediate),
-        (0xE4, &AdressingMode::ZeroPage),
-        (0xEC, &AdressingMode::Absolute),
+        (0xE0, 2, &AdressingMode::Immediate),
+        (0xE4, 3, &AdressingMode::ZeroPage),
+        (0xEC, 4, &AdressingMode::Absolute),
     ]),
 
     ("CPY", opcodes::cpy, &[
-        (0xC0, &AdressingMode::Immediate),
-        (0xC4, &AdressingMode::ZeroPage),
-        (0xCC, &AdressingMode::Absolute),
+        (0xC0, 2, &AdressingMode::Immediate),
+        (0xC4, 3, &AdressingMode::ZeroPage),
+        (0xCC, 4, &AdressingMode::Absolute),
     ]),
 
+    // TODO: page boundary cycles
     ("LDA", opcodes::lda, &[
-        (0xA9, &AdressingMode::Immediate),
-        (0xA5, &AdressingMode::ZeroPage),
-        (0xB5, &AdressingMode::ZeroPageX),
-        (0xAD, &AdressingMode::Absolute),
-        (0xBD, &AdressingMode::AbsoluteX),
-        (0xB9, &AdressingMode::AbsoluteY),
-        (0xA1, &AdressingMode::IndirectX),
-        (0xB1, &AdressingMode::IndirectY),
+        (0xA9, 2, &AdressingMode::Immediate),
+        (0xA5, 3, &AdressingMode::ZeroPage),
+        (0xB5, 4, &AdressingMode::ZeroPageX),
+        (0xAD, 4, &AdressingMode::Absolute),
+        (0xBD, 4, &AdressingMode::AbsoluteX),
+        (0xB9, 4, &AdressingMode::AbsoluteY),
+        (0xA1, 6, &AdressingMode::IndirectX),
+        (0xB1, 5, &AdressingMode::IndirectY),
     ]),
 
+    // TODO: page boundary cycles
     ("LDX", opcodes::ldx, &[
-        (0xA2, &AdressingMode::Immediate),
-        (0xA6, &AdressingMode::ZeroPage),
-        (0xB6, &AdressingMode::ZeroPageY),
-        (0xAE, &AdressingMode::Absolute),
-        (0xBE, &AdressingMode::AbsoluteY),
+        (0xA2, 2, &AdressingMode::Immediate),
+        (0xA6, 3, &AdressingMode::ZeroPage),
+        (0xB6, 4, &AdressingMode::ZeroPageY),
+        (0xAE, 4, &AdressingMode::Absolute),
+        (0xBE, 4, &AdressingMode::AbsoluteY),
     ]),
 
+    // TODO: page boundary cycles
     ("LDY", opcodes::ldy, &[
-        (0xA0, &AdressingMode::Immediate),
-        (0xA4, &AdressingMode::ZeroPage),
-        (0xB4, &AdressingMode::ZeroPageX),
-        (0xAC, &AdressingMode::Absolute),
-        (0xBC, &AdressingMode::AbsoluteX),
+        (0xA0, 2, &AdressingMode::Immediate),
+        (0xA4, 3, &AdressingMode::ZeroPage),
+        (0xB4, 4, &AdressingMode::ZeroPageX),
+        (0xAC, 4, &AdressingMode::Absolute),
+        (0xBC, 4, &AdressingMode::AbsoluteX),
     ]),
 
     ("STA", opcodes::sta, &[
-        (0x85, &AdressingMode::ZeroPage),
-        (0x95, &AdressingMode::ZeroPageX),
-        (0x8D, &AdressingMode::Absolute),
-        (0x9D, &AdressingMode::AbsoluteX),
-        (0x99, &AdressingMode::AbsoluteY),
-        (0x81, &AdressingMode::IndirectX),
-        (0x91, &AdressingMode::IndirectY),
+        (0x85, 3, &AdressingMode::ZeroPage),
+        (0x95, 4, &AdressingMode::ZeroPageX),
+        (0x8D, 4, &AdressingMode::Absolute),
+        (0x9D, 5, &AdressingMode::AbsoluteX),
+        (0x99, 5, &AdressingMode::AbsoluteY),
+        (0x81, 6, &AdressingMode::IndirectX),
+        (0x91, 6, &AdressingMode::IndirectY),
     ]),
 
     ("STX", opcodes::stx, &[
-        (0x86, &AdressingMode::ZeroPage),
-        (0x96, &AdressingMode::ZeroPageY),
-        (0x8E, &AdressingMode::Absolute),
+        (0x86, 3, &AdressingMode::ZeroPage),
+        (0x96, 4, &AdressingMode::ZeroPageY),
+        (0x8E, 4, &AdressingMode::Absolute),
     ]),
 
     ("STY", opcodes::sty, &[
-        (0x84, &AdressingMode::ZeroPage),
-        (0x94, &AdressingMode::ZeroPageX),
-        (0x8C, &AdressingMode::Absolute),
+        (0x84, 3, &AdressingMode::ZeroPage),
+        (0x94, 4, &AdressingMode::ZeroPageX),
+        (0x8C, 4, &AdressingMode::Absolute),
     ]),
 
     // Unofficial opcodes
 
+    // TODO: page boundary cycles
     ("LAX", opcodes::lax, &[
-        (0xA7, &AdressingMode::ZeroPage),
-        (0xB7, &AdressingMode::ZeroPageY),
-        (0xAF, &AdressingMode::Absolute),
-        (0xBF, &AdressingMode::AbsoluteY),
-        (0xA3, &AdressingMode::IndirectX),
-        (0xB3, &AdressingMode::IndirectY),
+        (0xA7, 3, &AdressingMode::ZeroPage),
+        (0xB7, 4, &AdressingMode::ZeroPageY),
+        (0xAF, 4, &AdressingMode::Absolute),
+        (0xBF, 4, &AdressingMode::AbsoluteY),
+        (0xA3, 6, &AdressingMode::IndirectX),
+        (0xB3, 5, &AdressingMode::IndirectY),
     ]),
 
     ("SAX", opcodes::sax, &[
-        (0x87, &AdressingMode::ZeroPage),
-        (0x97, &AdressingMode::ZeroPageY),
-        (0x8F, &AdressingMode::Absolute),
-        (0x83, &AdressingMode::IndirectX),
+        (0x87, 3, &AdressingMode::ZeroPage),
+        (0x97, 4, &AdressingMode::ZeroPageY),
+        (0x8F, 4, &AdressingMode::Absolute),
+        (0x83, 6, &AdressingMode::IndirectX),
     ]),
 
     ("DCP", opcodes::dcp, &[
-        (0xC7, &AdressingMode::ZeroPage),
-        (0xD7, &AdressingMode::ZeroPageX),
-        (0xCF, &AdressingMode::Absolute),
-        (0xDF, &AdressingMode::AbsoluteX),
-        (0xDB, &AdressingMode::AbsoluteY),
-        (0xC3, &AdressingMode::IndirectX),
-        (0xD3, &AdressingMode::IndirectY),
+        (0xC7, 5, &AdressingMode::ZeroPage),
+        (0xD7, 6, &AdressingMode::ZeroPageX),
+        (0xCF, 6, &AdressingMode::Absolute),
+        (0xDF, 7, &AdressingMode::AbsoluteX),
+        (0xDB, 7, &AdressingMode::AbsoluteY),
+        (0xC3, 8, &AdressingMode::IndirectX),
+        (0xD3, 8, &AdressingMode::IndirectY),
     ]),
 
     ("ISB", opcodes::isb, &[
-        (0xE7, &AdressingMode::ZeroPage),
-        (0xF7, &AdressingMode::ZeroPageX),
-        (0xEF, &AdressingMode::Absolute),
-        (0xFF, &AdressingMode::AbsoluteX),
-        (0xFB, &AdressingMode::AbsoluteY),
-        (0xE3, &AdressingMode::IndirectX),
-        (0xF3, &AdressingMode::IndirectY),
+        (0xE7, 5, &AdressingMode::ZeroPage),
+        (0xF7, 6, &AdressingMode::ZeroPageX),
+        (0xEF, 6, &AdressingMode::Absolute),
+        (0xFF, 7, &AdressingMode::AbsoluteX),
+        (0xFB, 7, &AdressingMode::AbsoluteY),
+        (0xE3, 8, &AdressingMode::IndirectX),
+        (0xF3, 8, &AdressingMode::IndirectY),
     ]),
 
     ("SLO", opcodes::slo, &[
-        (0x07, &AdressingMode::ZeroPage),
-        (0x17, &AdressingMode::ZeroPageX),
-        (0x0F, &AdressingMode::Absolute),
-        (0x1F, &AdressingMode::AbsoluteX),
-        (0x1B, &AdressingMode::AbsoluteY),
-        (0x03, &AdressingMode::IndirectX),
-        (0x13, &AdressingMode::IndirectY),
+        (0x07, 5, &AdressingMode::ZeroPage),
+        (0x17, 6, &AdressingMode::ZeroPageX),
+        (0x0F, 6, &AdressingMode::Absolute),
+        (0x1F, 7, &AdressingMode::AbsoluteX),
+        (0x1B, 7, &AdressingMode::AbsoluteY),
+        (0x03, 8, &AdressingMode::IndirectX),
+        (0x13, 8, &AdressingMode::IndirectY),
     ]),
 
     ("RLA", opcodes::rla, &[
-        (0x27, &AdressingMode::ZeroPage),
-        (0x37, &AdressingMode::ZeroPageX),
-        (0x2F, &AdressingMode::Absolute),
-        (0x3F, &AdressingMode::AbsoluteX),
-        (0x3B, &AdressingMode::AbsoluteY),
-        (0x23, &AdressingMode::IndirectX),
-        (0x33, &AdressingMode::IndirectY),
+        (0x27, 5, &AdressingMode::ZeroPage),
+        (0x37, 6, &AdressingMode::ZeroPageX),
+        (0x2F, 6, &AdressingMode::Absolute),
+        (0x3F, 7, &AdressingMode::AbsoluteX),
+        (0x3B, 7, &AdressingMode::AbsoluteY),
+        (0x23, 8, &AdressingMode::IndirectX),
+        (0x33, 8, &AdressingMode::IndirectY),
     ]),
 
     ("SRE", opcodes::sre, &[
-        (0x47, &AdressingMode::ZeroPage),
-        (0x57, &AdressingMode::ZeroPageX),
-        (0x4F, &AdressingMode::Absolute),
-        (0x5F, &AdressingMode::AbsoluteX),
-        (0x5B, &AdressingMode::AbsoluteY),
-        (0x43, &AdressingMode::IndirectX),
-        (0x53, &AdressingMode::IndirectY),
+        (0x47, 5, &AdressingMode::ZeroPage),
+        (0x57, 6, &AdressingMode::ZeroPageX),
+        (0x4F, 6, &AdressingMode::Absolute),
+        (0x5F, 7, &AdressingMode::AbsoluteX),
+        (0x5B, 7, &AdressingMode::AbsoluteY),
+        (0x43, 8, &AdressingMode::IndirectX),
+        (0x53, 8, &AdressingMode::IndirectY),
     ]),
 
     ("RRA", opcodes::rra, &[
-        (0x67, &AdressingMode::ZeroPage),
-        (0x77, &AdressingMode::ZeroPageX),
-        (0x6F, &AdressingMode::Absolute),
-        (0x7F, &AdressingMode::AbsoluteX),
-        (0x7B, &AdressingMode::AbsoluteY),
-        (0x63, &AdressingMode::IndirectX),
-        (0x73, &AdressingMode::IndirectY),
+        (0x67, 5, &AdressingMode::ZeroPage),
+        (0x77, 6, &AdressingMode::ZeroPageX),
+        (0x6F, 6, &AdressingMode::Absolute),
+        (0x7F, 7, &AdressingMode::AbsoluteX),
+        (0x7B, 7, &AdressingMode::AbsoluteY),
+        (0x63, 8, &AdressingMode::IndirectX),
+        (0x73, 8, &AdressingMode::IndirectY),
     ])
 ];
 

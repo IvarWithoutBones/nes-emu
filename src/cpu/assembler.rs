@@ -56,7 +56,7 @@ fn fetch_instruction(name: &str) -> Option<&Instruction> {
 
 fn get_modes_for_instr(instr: &Instruction) -> Option<Vec<&AdressingMode>> {
     let mut result = Vec::new();
-    for (_, mode) in instr.2 {
+    for (_, _, mode) in instr.2 {
         result.push(*mode);
     }
 
