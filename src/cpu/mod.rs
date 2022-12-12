@@ -25,9 +25,35 @@ bitflags! {
     }
 }
 
+impl CpuFlags {
+    const fn format(&self, flag: CpuFlags, display: char) -> char {
+        if self.contains(flag) {
+            display
+        } else {
+            '-'
+        }
+    }
+}
+
 impl fmt::Display for CpuFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.bits() as u8)
+        let mut string = String::with_capacity(8);
+        string.push(self.format(CpuFlags::NEGATIVE, 'N'));
+        string.push(self.format(CpuFlags::OVERFLOW, 'O'));
+        string.push(self.format(CpuFlags::BREAK2, 'B'));
+        string.push(self.format(CpuFlags::BREAK, 'B'));
+        string.push(self.format(CpuFlags::DECIMAL, 'D'));
+        string.push(self.format(CpuFlags::IRQ, 'I'));
+        string.push(self.format(CpuFlags::ZERO, 'Z'));
+        string.push(self.format(CpuFlags::CARRY, 'C'));
+        write!(f, "{}", string)
+    }
+}
+
+impl Default for CpuFlags {
+    fn default() -> CpuFlags {
+        // Self::IRQ | Self::BREAK | Self::BREAK2
+        Self::IRQ | Self::BREAK2 // Hack to diff against nestest log, above is correct
     }
 }
 
@@ -42,15 +68,18 @@ pub struct CPU {
 }
 
 impl CPU {
+    #[allow(dead_code)] // TODO: fix
     const RESET_VECTOR: u16 = 0xFFFC;
+
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
+    const RESET_CYCLES: u64 = 7;
 
     pub fn new(bus: Bus) -> CPU {
         CPU {
             program_counter: PROGRAM_ROM_START,
             stack_pointer: CPU::STACK_RESET,
-            status: CpuFlags::empty(),
+            status: CpuFlags::default(),
             accumulator: 0,
             register_x: 0,
             register_y: 0,
@@ -59,13 +88,14 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
-        self.status = CpuFlags::from_bits_truncate(0x24); // Hack to diff against nestest log, should be 0x34
+        self.set_cycles(CPU::RESET_CYCLES);
+        self.status = CpuFlags::default();
         self.stack_pointer = CPU::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
         self.register_y = 0;
 
-        // This is a hack, but starting at the beggining of prg rom makes nesdev get further
+        // This is a hack to skip graphic init in nestest
         self.program_counter = 0xC000;
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
@@ -126,10 +156,6 @@ impl CPU {
                 .as_str(),
             );
 
-            let extra_cycles =
-                instruction_cycles(instr, mode).expect("failed to get cycles for instruction");
-            self.tick(extra_cycles as u64);
-
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
                 println!("{0: <33}\t{1:}", instr_str, self);
@@ -140,6 +166,10 @@ impl CPU {
             };
 
             self.program_counter = execute_instruction(self, instr, mode);
+
+            let extra_cycles =
+                instruction_cycles(instr, mode).expect("failed to get cycles for instruction");
+            self.tick(extra_cycles as u64);
         }
     }
 }
@@ -148,12 +178,13 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} CYC:{}",
+            "A:{:02X} X:{:02X} Y:{:02X} SP:{:02X} {} ({:02X}) CYC:{}",
             self.accumulator,
             self.register_x,
             self.register_y,
-            self.status,
             self.stack_pointer,
+            self.status,
+            self.status.bits(),
             self.get_cycles()
         )
     }
@@ -176,6 +207,10 @@ impl Clock for CPU {
 
     fn get_cycles(&self) -> u64 {
         self.bus.get_cycles()
+    }
+
+    fn set_cycles(&mut self, cycles: u64) {
+        self.bus.set_cycles(cycles);
     }
 }
 

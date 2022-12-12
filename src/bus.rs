@@ -13,6 +13,7 @@ const PPU_REGISTERS_MIRROR_END: u16 = 0x3FFF;
 pub trait Clock {
     fn tick_internal(&mut self, cycles: u64);
     fn get_cycles(&self) -> u64;
+    fn set_cycles(&mut self, cycles: u64);
 
     const MULTIPLIER: u64 = 1;
     fn tick(&mut self, cycles: u64) {
@@ -115,6 +116,10 @@ impl Memory for Bus {
 impl Clock for Bus {
     fn tick_internal(&mut self, cycles: u64) {
         self.cycles += cycles;
+    }
+
+    fn set_cycles(&mut self, cycles: u64) {
+        self.cycles = cycles;
     }
 
     fn get_cycles(&self) -> u64 {
