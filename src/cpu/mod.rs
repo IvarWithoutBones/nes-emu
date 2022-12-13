@@ -3,7 +3,7 @@ mod instructions;
 
 use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
-use instructions::{execute_instruction, format_instruction, instruction_name, decode_instruction};
+use instructions::Instruction;
 use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
@@ -32,8 +32,8 @@ impl AdressingMode {
         }
     }
 
-    // The length of an instruction, counting the identifier and arguments
-    pub const fn opcode_len(&self) -> u16 {
+    /// The length of an instruction, counting the identifier and arguments
+    pub const fn len(&self) -> u16 {
         match self {
             AdressingMode::Implied | AdressingMode::Accumulator => 1,
 
@@ -52,6 +52,7 @@ impl AdressingMode {
         }
     }
 
+    /// Fetch the address of the operand
     pub fn fetch_param_address(&self, cpu: &CPU) -> u16 {
         let after_opcode = cpu.program_counter.wrapping_add(1);
         match self {
@@ -94,7 +95,6 @@ impl AdressingMode {
 
             AdressingMode::IndirectX => {
                 let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
-
                 u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
                     cpu.read_byte(ptr.wrapping_add(1) as u16),
@@ -184,34 +184,6 @@ impl CPU {
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
-    // Used by all branching instructions
-    pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
-        if condition {
-            self.tick(1);
-            let offset = self.read_byte(mode.fetch_param_address(self));
-
-            // Two's complement signed offset to branch backwards
-            let new_pc = if offset > (u8::MAX / 2) {
-                self.program_counter
-                    .wrapping_add(mode.opcode_len())
-                    .wrapping_sub(offset.wrapping_neg() as u16)
-            } else {
-                self.program_counter
-                    .wrapping_add(mode.opcode_len())
-                    .wrapping_add(offset as u16)
-            };
-
-            // Page boundary crossing takes an additional cycle
-            if !Self::is_on_same_page(self.program_counter, new_pc) {
-                self.tick(1);
-            }
-
-            return new_pc;
-        }
-        // TODO: move consume_opcode()?
-        self.program_counter + mode.opcode_len()
-    }
-
     pub fn push_byte(&mut self, data: u8) {
         self.write_byte(CPU::STACK_OFFSET + self.stack_pointer as u16, data);
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
@@ -241,7 +213,7 @@ impl CPU {
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            let (instr, mode, cycles) = decode_instruction(opcode).expect(
+            let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
                 format!(
                     "invalid opcode ${:02X} at PC ${:04X}",
                     opcode, self.program_counter
@@ -250,19 +222,28 @@ impl CPU {
             );
 
             if !self.bus.quiet {
-                let instr_str = format_instruction(self, instr, mode);
                 let instr_bytes = self.format_instruction_bytes(mode);
                 println!(
                     "{:04X}  {1: <9} {2:}  {3:}",
-                    self.program_counter, instr_bytes, self, instr_str
+                    self.program_counter,
+                    instr_bytes,
+                    self,
+                    instr.format(self, mode)
                 );
             }
 
-            if instruction_name(instr) == "BRK" {
+            if instr.name == "BRK" {
+                // TODO: properly implement
                 break;
             };
 
-            self.program_counter = execute_instruction(self, instr, mode);
+            let program_counter_prior = self.program_counter;
+            (instr.function)(self, mode);
+            if self.program_counter == program_counter_prior {
+                // Some instructions (e.g. JMP) set the program counter themselves
+                self.program_counter += mode.len();
+            }
+
             self.tick(*cycles as u64);
         }
     }
@@ -279,7 +260,7 @@ impl CPU {
 
     fn format_instruction_bytes(&self, mode: &AdressingMode) -> String {
         let mut bytes = String::new();
-        for i in 0..mode.opcode_len() {
+        for i in 0..mode.len() {
             bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
         }
         bytes
