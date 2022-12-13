@@ -9,21 +9,12 @@ pub type Instruction = (
 );
 
 /// Retrieve an instruction based on an identifier
-pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'static AdressingMode)> {
+pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'static AdressingMode, &'static u8)> {
     for instr in INSTRUCTIONS.iter() {
-        for (opcode, _, mode) in instr.2 {
+        for (opcode, cycles, mode) in instr.2 {
             if *opcode == identifier {
-                return Some((instr, mode));
+                return Some((instr, mode, cycles));
             }
-        }
-    }
-    None
-}
-
-pub fn instruction_cycles(instr: &'static Instruction, mode: &'static AdressingMode) -> Option<u8> {
-    for (_, cycles, m) in instr.2 {
-        if *m == mode {
-            return Some(*cycles);
         }
     }
     None
@@ -42,16 +33,11 @@ pub fn instruction_name(instr: &'static Instruction) -> &'static str {
 }
 
 pub fn format_instruction(
-    cpu: &mut CPU,
+    cpu: &CPU,
     instr: &'static Instruction,
     mode: &AdressingMode,
 ) -> String {
-    let mut bytes = String::from(format!("{:02X} ", cpu.read_byte(cpu.program_counter)));
     let mut args = String::new();
-
-    for i in 1..mode.opcode_len() {
-        bytes += &format!("{:02X} ", cpu.read_byte(cpu.program_counter + i as u16));
-    }
 
     match mode {
         &AdressingMode::Immediate => {
@@ -79,9 +65,7 @@ pub fn format_instruction(
     }
 
     format!(
-        "{:04X} {1: <9}{2: <3} {3: <6}",
-        cpu.program_counter,
-        bytes,
+        "{0: <3} {1: <6}",
         instruction_name(instr),
         args,
     )

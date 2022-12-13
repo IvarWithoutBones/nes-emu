@@ -8,8 +8,6 @@ use instructions::{
 };
 use std::fmt;
 
-use self::instructions::instruction_cycles;
-
 bitflags! {
     #[rustfmt::skip]
     #[derive(Debug, Clone, PartialEq)]
@@ -145,12 +143,20 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
+    fn format_instruction_bytes(&self, mode: &AdressingMode) -> String {
+        let mut bytes = String::new();
+        for i in 0..mode.opcode_len() {
+            bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
+        }
+        bytes
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            let (instr, mode) = parse_instruction(opcode).expect(
+            let (instr, mode, cycles) = parse_instruction(opcode).expect(
                 format!(
-                    "invalid opcode {:#02x} at PC {:04X}",
+                    "invalid opcode ${:02X} at PC ${:04X}",
                     opcode, self.program_counter
                 )
                 .as_str(),
@@ -158,7 +164,11 @@ impl CPU {
 
             if !self.bus.quiet {
                 let instr_str = format_instruction(self, instr, mode);
-                println!("{0: <33}\t{1:}", instr_str, self);
+                let instr_bytes = self.format_instruction_bytes(mode);
+                println!(
+                    "{:04X}  {1: <9}  {2:}  {3:}",
+                    self.program_counter, instr_bytes, self, instr_str
+                );
             }
 
             if instruction_name(instr) == "BRK" {
@@ -166,10 +176,7 @@ impl CPU {
             };
 
             self.program_counter = execute_instruction(self, instr, mode);
-
-            let extra_cycles =
-                instruction_cycles(instr, mode).expect("failed to get cycles for instruction");
-            self.tick(extra_cycles as u64);
+            self.tick(*cycles as u64);
         }
     }
 }
@@ -178,14 +185,14 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A:{:02X} X:{:02X} Y:{:02X} SP:{:02X} {} ({:02X}) CYC:{}",
+            "A:{:02X} X:{:02X} Y:{:02X} SP:{:02X} P:{:02X} C:{5: <5} {6:}",
             self.accumulator,
             self.register_x,
             self.register_y,
             self.stack_pointer,
             self.status,
-            self.status.bits(),
-            self.get_cycles()
+            self.get_cycles(),
+            self.status
         )
     }
 }
