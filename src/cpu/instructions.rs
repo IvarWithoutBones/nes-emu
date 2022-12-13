@@ -44,16 +44,16 @@ impl Instruction {
         let mut args = String::new();
         match mode {
             &AdressingMode::Immediate => {
-                args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu)));
+                args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu).0));
             }
 
             &AdressingMode::Relative => {
                 // TODO: this is hacky, instructions seem to work fine though
-                args = format!("${:02X}", mode.fetch_param_address(cpu).wrapping_add(1));
+                args = format!("${:02X}", mode.fetch_param_address(cpu).0.wrapping_add(1));
             }
 
             &AdressingMode::ZeroPage => {
-                args = format!("${:02X}", mode.fetch_param_address(cpu));
+                args = format!("${:02X}", mode.fetch_param_address(cpu).0);
             }
 
             &AdressingMode::Accumulator => {
@@ -62,7 +62,7 @@ impl Instruction {
 
             _ => {
                 if mode.has_arguments() {
-                    args = format!("${:04X}", mode.fetch_param_address(cpu))
+                    args = format!("${:04X}", mode.fetch_param_address(cpu).0)
                 }
             }
         }
@@ -75,9 +75,10 @@ impl Instruction {
 */
 
 fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
+    // TODO: should some of this be moved to the addressing mode?
     let after_opcode = cpu.program_counter.wrapping_add(mode.len());
     if condition {
-        let offset = cpu.read_byte(mode.fetch_param_address(cpu));
+        let offset = cpu.read_byte(mode.fetch_param_address(cpu).0);
         cpu.tick(1);
 
         // Two's complement signed offset to branch backwards
@@ -87,8 +88,7 @@ fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
             after_opcode.wrapping_add(offset as u16)
         };
 
-        // Page boundary crossing takes an additional cycle
-        if !CPU::is_on_same_page(cpu.program_counter, new_pc) {
+        if CPU::is_on_different_page(after_opcode, new_pc) {
             cpu.tick(1);
         }
 
@@ -102,30 +102,34 @@ fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
 mod instructions {
     use super::*;
 
-    pub fn nop(_: &mut CPU, _: &AdressingMode) {}
+    pub fn nop(cpu: &mut CPU, mode: &AdressingMode) {
+        if mode.has_arguments() {
+            // Some illegal opcodes use this with arguments
+            cpu.tick_once_if(mode.fetch_param(cpu).1)
+        }
+    }
 
-    pub fn brk(_: &mut CPU, _: &AdressingMode) {
+    pub fn brk(_cpu: &mut CPU, _mode: &AdressingMode) {
         // TODO: Should execute code from the BRK vector
     }
 
     pub fn jmp(cpu: &mut CPU, mode: &AdressingMode) {
-        cpu.program_counter = mode.fetch_param_address(cpu);
+        cpu.program_counter = mode.fetch_param_address(cpu).0;
     }
 
-    pub fn inx(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn inx(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_x = cpu.register_x.wrapping_add(1);
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn iny(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn iny(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_y = cpu.register_y.wrapping_add(1);
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
     pub fn inc(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_add(1);
-
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
     }
@@ -139,9 +143,7 @@ mod instructions {
     }
 
     pub fn adc(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         let (data, overflow1) = cpu.accumulator.overflowing_add(value);
         let (result, overflow2) = data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
 
@@ -153,12 +155,11 @@ mod instructions {
         );
 
         cpu.accumulator = result;
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn sbc(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
         let (result, overflow2) = data.overflowing_sub(!cpu.status.contains(CpuFlags::CARRY) as u8);
 
@@ -170,49 +171,44 @@ mod instructions {
         );
 
         cpu.accumulator = result;
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn cmp(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn cpx(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let value = mode.fetch_param(cpu).0;
         cpu.status.set(CpuFlags::CARRY, cpu.register_x >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_x.wrapping_sub(value));
     }
 
     pub fn cpy(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let value = mode.fetch_param(cpu).0;
         cpu.status.set(CpuFlags::CARRY, cpu.register_y >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_y.wrapping_sub(value));
     }
 
     pub fn dec(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_sub(1);
-
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
     }
 
-    pub fn dey(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn dey(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_y = cpu.register_y.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
-    pub fn dex(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn dex(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_x = cpu.register_x.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
@@ -249,7 +245,7 @@ mod instructions {
         branch(cpu, mode, !cpu.status.contains(CpuFlags::OVERFLOW));
     }
 
-    pub fn php(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn php(cpu: &mut CPU, _mode: &AdressingMode) {
         let mut status = cpu.status.clone();
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         status.insert(CpuFlags::BREAK);
@@ -257,81 +253,77 @@ mod instructions {
         cpu.push_byte(status.bits());
     }
 
-    pub fn plp(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn plp(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status = CpuFlags::from_bits_truncate(cpu.pop_byte());
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         cpu.status.remove(CpuFlags::BREAK);
         cpu.status.insert(CpuFlags::BREAK2);
     }
 
-    pub fn pha(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn pha(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.push_byte(cpu.accumulator);
     }
 
-    pub fn pla(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn pla(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.accumulator = cpu.pop_byte();
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn tax(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn tax(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_x = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn txa(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn txa(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.accumulator = cpu.register_x;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn tay(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn tay(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_y = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
-    pub fn tya(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn tya(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.accumulator = cpu.register_y;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn clv(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn clv(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.remove(CpuFlags::OVERFLOW);
     }
 
-    pub fn clc(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn clc(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.remove(CpuFlags::CARRY);
     }
 
-    pub fn cld(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn cld(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.remove(CpuFlags::DECIMAL);
     }
 
-    pub fn sec(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn sec(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.insert(CpuFlags::CARRY);
     }
 
-    pub fn sed(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn sed(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.insert(CpuFlags::DECIMAL);
     }
 
-    pub fn sei(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn sei(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.insert(CpuFlags::IRQ);
     }
 
-    pub fn cli(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn cli(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.status.remove(CpuFlags::IRQ);
     }
 
     pub fn jsr(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        cpu.push_word(
-            cpu.program_counter
-                .wrapping_add(mode.len())
-                .wrapping_sub(1),
-        );
+        let addr = mode.fetch_param_address(cpu).0;
+        cpu.push_word(cpu.program_counter.wrapping_add(mode.len()).wrapping_sub(1));
         cpu.program_counter = addr;
     }
 
-    pub fn rts(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn rts(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.program_counter = cpu.pop_word().wrapping_add(1);
     }
 
@@ -342,8 +334,9 @@ mod instructions {
             cpu.accumulator >>= 1;
             cpu.accumulator
         } else {
-            let addr = mode.fetch_param_address(cpu);
+            let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
+
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
             value >>= 1;
             cpu.write_byte(addr, value);
@@ -360,7 +353,7 @@ mod instructions {
             cpu.accumulator <<= 1;
             cpu.accumulator
         } else {
-            let addr = mode.fetch_param_address(cpu);
+            let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
@@ -382,7 +375,7 @@ mod instructions {
             cpu.accumulator = rotate_right(cpu.accumulator);
             cpu.accumulator
         } else {
-            let addr = mode.fetch_param_address(cpu);
+            let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
@@ -404,7 +397,7 @@ mod instructions {
             cpu.accumulator = rotate_left(cpu.accumulator);
             cpu.accumulator
         } else {
-            let addr = mode.fetch_param_address(cpu);
+            let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
             cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
@@ -417,107 +410,97 @@ mod instructions {
     }
 
     pub fn and(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator &= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn eor(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator ^= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn ora(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator |= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn lda(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator = value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn ldx(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.register_x = value;
         cpu.update_zero_and_negative_flags(cpu.register_x);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn ldy(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.register_y = value;
         cpu.update_zero_and_negative_flags(cpu.register_y);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn sta(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.accumulator);
     }
 
     pub fn stx(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.register_x);
     }
 
     pub fn sty(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.register_y);
     }
 
     pub fn bit(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let value = mode.fetch_param(cpu).0;
         cpu.status
             .set(CpuFlags::ZERO, (cpu.accumulator & value) == 0);
         cpu.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
         cpu.status.set(CpuFlags::OVERFLOW, CPU::nth_bit(value, 6));
     }
 
-    pub fn tsx(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn tsx(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.register_x = cpu.stack_pointer;
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn txs(cpu: &mut CPU, _: &AdressingMode) {
+    pub fn txs(cpu: &mut CPU, _mode: &AdressingMode) {
         cpu.stack_pointer = cpu.register_x;
     }
 
     // Unofficial opcodes
 
     pub fn lax(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
-        let value = cpu.read_byte(addr);
-
+        let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator = value;
         cpu.register_x = value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
+        cpu.tick_once_if(page_crossed);
     }
 
     pub fn sax(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let result = cpu.accumulator & cpu.register_x;
-
         cpu.write_byte(addr, result);
     }
 
     pub fn dcp(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_sub(1);
 
         cpu.write_byte(addr, value);
@@ -529,7 +512,7 @@ mod instructions {
     }
 
     pub fn isb(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_add(1);
 
         let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
@@ -547,7 +530,7 @@ mod instructions {
     }
 
     pub fn slo(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
         cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
@@ -559,7 +542,7 @@ mod instructions {
     }
 
     pub fn rla(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
         let carry = cpu.status.contains(CpuFlags::CARRY);
@@ -574,7 +557,7 @@ mod instructions {
     }
 
     pub fn sre(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
         cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
@@ -586,7 +569,7 @@ mod instructions {
     }
 
     pub fn rra(cpu: &mut CPU, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu);
+        let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
         let carry = cpu.status.contains(CpuFlags::CARRY);
@@ -661,7 +644,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
     instr!("TSX", instructions::tsx, (0xBA, 2, &AdressingMode::Implied)),
     instr!("TXS", instructions::txs, (0x9A, 2, &AdressingMode::Implied)),
 
-    // TODO: page boundary cycles
     instr!("NOP", instructions::nop,
         (0x80, 2, &AdressingMode::Immediate),
         (0x0C, 4, &AdressingMode::Absolute),
@@ -670,7 +652,7 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x5C, 4, &AdressingMode::AbsoluteX),
         (0x7C, 4, &AdressingMode::AbsoluteX),
         (0xDC, 4, &AdressingMode::AbsoluteX),
-        (0xFC, 2, &AdressingMode::AbsoluteX),
+        (0xFC, 4, &AdressingMode::AbsoluteX),
         (0xEA, 2, &AdressingMode::Implied),
         (0x1A, 2, &AdressingMode::Implied),
         (0x3A, 2, &AdressingMode::Implied),
@@ -718,7 +700,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0xDE, 7, &AdressingMode::AbsoluteX)
     ),
 
-    // TODO: page boundary cycles
     instr!("ADC", instructions::adc,
         (0x69, 2, &AdressingMode::Immediate),
         (0x65, 3, &AdressingMode::ZeroPage),
@@ -730,7 +711,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x71, 5, &AdressingMode::IndirectY)
     ),
 
-    // TODO: page boundary cycles
     instr!("SBC", instructions::sbc,
         (0xE9, 2, &AdressingMode::Immediate),
         (0xEB, 2, &AdressingMode::Immediate), // Undocumented
@@ -775,7 +755,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x7E, 7, &AdressingMode::AbsoluteX)
     ),
 
-    // TODO: page boundary cycles
     instr!("AND", instructions::and,
         (0x29, 2, &AdressingMode::Immediate),
         (0x25, 3, &AdressingMode::ZeroPage),
@@ -787,7 +766,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x31, 5, &AdressingMode::IndirectY)
     ),
 
-    // TODO: page boundary cycles
     instr!("EOR", instructions::eor,
         (0x49, 2, &AdressingMode::Immediate),
         (0x45, 3, &AdressingMode::ZeroPage),
@@ -799,7 +777,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x51, 5, &AdressingMode::IndirectY)
     ),
 
-    // TODO: page boundary cycles
     instr!("ORA", instructions::ora,
         (0x09, 2, &AdressingMode::Immediate),
         (0x05, 3, &AdressingMode::ZeroPage),
@@ -811,7 +788,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x11, 5, &AdressingMode::IndirectY)
     ),
 
-    // TODO: page boundary cycles
     instr!("CMP", instructions::cmp,
         (0xC9, 2, &AdressingMode::Immediate),
         (0xC5, 3, &AdressingMode::ZeroPage),
@@ -835,7 +811,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0xCC, 4, &AdressingMode::Absolute)
     ),
 
-    // TODO: page boundary cycles
     instr!("LDA", instructions::lda,
         (0xA9, 2, &AdressingMode::Immediate),
         (0xA5, 3, &AdressingMode::ZeroPage),
@@ -847,7 +822,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0xB1, 5, &AdressingMode::IndirectY)
     ),
 
-    // TODO: page boundary cycles
     instr!("LDX", instructions::ldx,
         (0xA2, 2, &AdressingMode::Immediate),
         (0xA6, 3, &AdressingMode::ZeroPage),
@@ -856,7 +830,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0xBE, 4, &AdressingMode::AbsoluteY)
     ),
 
-    // TODO: page boundary cycles
     instr!("LDY", instructions::ldy,
         (0xA0, 2, &AdressingMode::Immediate),
         (0xA4, 3, &AdressingMode::ZeroPage),
@@ -889,7 +862,6 @@ const INSTRUCTIONS: [Instruction; 64] = [
 
     // Unofficial opcodes
 
-    // TODO: page boundary cycles
     instr!("LAX", instructions::lax,
         (0xA7, 3, &AdressingMode::ZeroPage),
         (0xB7, 4, &AdressingMode::ZeroPageY),

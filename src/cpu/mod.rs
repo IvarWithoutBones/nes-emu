@@ -52,31 +52,37 @@ impl AdressingMode {
         }
     }
 
-    /// Fetch the address of the operand
-    pub fn fetch_param_address(&self, cpu: &CPU) -> u16 {
+    /// Fetch the address of the operand. Returns the address and a flag indicating if a page boundary was crossed
+    pub fn fetch_param_address(&self, cpu: &CPU) -> (u16, bool) {
         let after_opcode = cpu.program_counter.wrapping_add(1);
         match self {
-            AdressingMode::Immediate | AdressingMode::Relative => after_opcode,
-            AdressingMode::Absolute => cpu.read_word(after_opcode),
-            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
+            Self::Immediate | Self::Relative => (after_opcode, false),
+            Self::Absolute => (cpu.read_word(after_opcode), false),
+            Self::ZeroPage => (cpu.read_byte(after_opcode) as u16, false),
 
-            AdressingMode::ZeroPageX => {
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16
+            Self::ZeroPageX => (
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16,
+                false
+            ),
+
+            Self::ZeroPageY => (
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16,
+                false
+            ),
+
+            Self::AbsoluteX => {
+                let addr_base = cpu.read_word(after_opcode);
+                let addr = addr_base.wrapping_add(cpu.register_x as u16);
+                (addr, CPU::is_on_different_page(addr_base, addr))
             }
 
-            AdressingMode::ZeroPageY => {
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16
+            Self::AbsoluteY => {
+                let addr_base = cpu.read_word(after_opcode);
+                let addr = addr_base.wrapping_add(cpu.register_y as u16);
+                (addr, CPU::is_on_different_page(addr_base, addr))
             }
 
-            AdressingMode::AbsoluteX => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_x as u16),
-
-            AdressingMode::AbsoluteY => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_y as u16),
-
-            AdressingMode::Indirect => {
+            Self::Indirect => {
                 let ptr = cpu.read_word(after_opcode);
                 let low = cpu.read_byte(ptr as u16);
 
@@ -84,36 +90,44 @@ impl AdressingMode {
                 //    "An original 6502 has does not correctly fetch the target address if the indirect vector
                 //    falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case
                 //    it fetches the LSB from $xxFF as expected but takes the MSB from $xx00"
-                let high = if ptr & 0x00FF != 0xFF {
-                    cpu.read_byte(ptr.wrapping_add(1))
-                } else {
+                let high = if ptr & 0x00FF == 0xFF {
                     cpu.read_byte(ptr & 0xFF00)
+                } else {
+                    cpu.read_byte(ptr.wrapping_add(1))
                 };
 
-                u16::from_le_bytes([low, high])
+                (u16::from_le_bytes([low, high]), false)
             }
 
-            AdressingMode::IndirectX => {
+            Self::IndirectX => {
                 let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
-                u16::from_le_bytes([
+                let addr = u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ])
+                    cpu.read_byte(ptr.wrapping_add(1) as u16)
+                ]);
+                (addr, false)
             }
 
-            AdressingMode::IndirectY => {
+            Self::IndirectY => {
                 let ptr = cpu.read_byte(after_opcode);
-                u16::from_le_bytes([
+                let addr_base = u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ])
-                .wrapping_add(cpu.register_y as u16)
+                    cpu.read_byte(ptr.wrapping_add(1) as u16)
+                ]);
+                let addr = addr_base.wrapping_add(cpu.register_y as u16);
+                (addr, CPU::is_on_different_page(addr_base, addr))
             }
 
-            AdressingMode::Implied | AdressingMode::Accumulator => {
+            _ => {
                 panic!("Addressing mode {} has no arguments!", self);
             }
         }
+    }
+
+    /// Fetch the operand. Returns the operand and a flag indicating if a page boundary was crossed.
+    pub fn fetch_param(&self, cpu: &CPU) -> (u8, bool) {
+        let (addr, page_crossed) = self.fetch_param_address(cpu);
+        (cpu.read_byte(addr), page_crossed)
     }
 }
 
@@ -221,12 +235,17 @@ impl CPU {
                 .as_str(),
             );
 
+            // TODO: do this from a callback to make it more flexible
             if !self.bus.quiet {
-                let instr_bytes = self.format_instruction_bytes(mode);
+                let mut bytes = String::new();
+                for i in 0..mode.len() {
+                    bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
+                }
+
                 println!(
                     "{:04X}  {1: <9} {2:}  {3:}",
                     self.program_counter,
-                    instr_bytes,
+                    bytes,
                     self,
                     instr.format(self, mode)
                 );
@@ -248,22 +267,14 @@ impl CPU {
         }
     }
 
-    /// Get the status of bit N in a u8
+    /// Get the status of bit N
     pub const fn nth_bit(value: u8, n: u8) -> bool {
         value & (1 << n) != 0
     }
 
-    /// Check if two values are contained on the same page in memory
-    pub const fn is_on_same_page(a: u16, b: u16) -> bool {
-        (a & 0xFF00) == (b & 0xFF00)
-    }
-
-    fn format_instruction_bytes(&self, mode: &AdressingMode) -> String {
-        let mut bytes = String::new();
-        for i in 0..mode.len() {
-            bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
-        }
-        bytes
+    /// Check if two values are contained on a different page in memory
+    pub const fn is_on_different_page(a: u16, b: u16) -> bool {
+        (a & 0xFF00) != (b & 0xFF00)
     }
 }
 
@@ -320,12 +331,12 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A:{:02X} X:{:02X} Y:{:02X} S:{:02X} P:{:02X} C:{5: <5} {6:}",
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} C:{5: <5} {6:}",
             self.accumulator,
             self.register_x,
             self.register_y,
-            self.stack_pointer,
             self.status,
+            self.stack_pointer,
             self.get_cycles(),
             self.status
         )

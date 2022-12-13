@@ -16,8 +16,15 @@ pub trait Clock {
     fn set_cycles(&mut self, cycles: u64);
 
     const MULTIPLIER: u64 = 1;
+
     fn tick(&mut self, cycles: u64) {
         self.tick_internal(cycles * Self::MULTIPLIER);
+    }
+
+    fn tick_once_if(&mut self, condition: bool) {
+        if condition {
+            self.tick(1);
+        }
     }
 }
 
@@ -109,7 +116,7 @@ impl Memory for Bus {
             }
 
             _ => println!(
-                "waring: unimplemented write at ${:04X}: ${:02X}",
+                "warning: unimplemented write at ${:04X}: ${:02X}",
                 address, data
             ),
         }
