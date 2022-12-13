@@ -77,14 +77,14 @@ impl Memory for Bus {
 
             PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
                 println!(
-                    "warning: unimplemented PPU register read at {:04X}",
+                    "warning: unimplemented PPU register read at ${:04X}",
                     address
                 );
                 0
             }
 
             _ => {
-                println!("warning: unimplemented read at {:04X}", address);
+                println!("warning: unimplemented read at ${:04X}", address);
                 0
             }
         }
@@ -97,18 +97,21 @@ impl Memory for Bus {
             }
 
             PROGRAM_ROM_START..=PROGRAM_ROM_END => println!(
-                "warning: attempted to write to program ROM at {:04X}",
-                address
+                "warning: attempted to write to program ROM at ${:04X}: ${:02X}",
+                address, data
             ),
 
             PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
                 println!(
-                    "warning: unimplemented PPU register write at {:04X}",
-                    address
+                    "warning: unimplemented PPU register write at ${:04X}: ${:02X}",
+                    address, data
                 );
             }
 
-            _ => println!("waring: unimplemented write at {:#06X}: {}", address, data),
+            _ => println!(
+                "waring: unimplemented write at ${:04X}: ${:02X}",
+                address, data
+            ),
         }
     }
 }

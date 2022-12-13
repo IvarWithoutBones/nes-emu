@@ -98,20 +98,38 @@ impl CPU {
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
+    /// Get the status of bit N in a u8
     pub const fn nth_bit(value: u8, n: u8) -> bool {
         value & (1 << n) != 0
     }
 
+    /// Check if two values are contained on the same page in memory
+    pub const fn is_on_same_page(a: u16, b: u16) -> bool {
+        (a & 0xFF00) == (b & 0xFF00)
+    }
+
     pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
         if condition {
+            self.tick(1);
             let offset = self.read_byte(mode.fetch_param_address(self));
 
-            if offset < 0x7F {
-                return self.program_counter + mode.opcode_len() as u16 + offset as u16;
+            // Two's complement signed offset
+            let new_pc = if offset > (u8::MAX / 2) {
+                self.program_counter
+                    .wrapping_add(mode.opcode_len())
+                    .wrapping_sub(offset.wrapping_neg() as u16)
             } else {
-                return (self.program_counter + mode.opcode_len() as u16)
-                    .wrapping_sub(offset.wrapping_neg() as u16);
+                self.program_counter
+                    .wrapping_add(mode.opcode_len())
+                    .wrapping_add(offset as u16)
+            };
+
+            // Page boundary crossing takes an additional cycle
+            if !Self::is_on_same_page(self.program_counter, new_pc) {
+                self.tick(1);
             }
+
+            return new_pc;
         }
         // TODO: move increment_pc()
         self.program_counter + mode.opcode_len()
@@ -166,7 +184,7 @@ impl CPU {
                 let instr_str = format_instruction(self, instr, mode);
                 let instr_bytes = self.format_instruction_bytes(mode);
                 println!(
-                    "{:04X}  {1: <9}  {2:}  {3:}",
+                    "{:04X}  {1: <9} {2:}  {3:}",
                     self.program_counter, instr_bytes, self, instr_str
                 );
             }
