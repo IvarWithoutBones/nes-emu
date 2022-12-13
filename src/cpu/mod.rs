@@ -3,48 +3,133 @@ mod instructions;
 
 use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
-use instructions::{
-    execute_instruction, format_instruction, instruction_name, parse_instruction, AdressingMode,
-};
+use instructions::{execute_instruction, format_instruction, instruction_name, decode_instruction};
 use std::fmt;
 
+/// See https://www.nesdev.org/wiki/CPU_addressing_modes
+#[derive(Debug, PartialEq)]
+pub enum AdressingMode {
+    Implied,
+    Relative,
+    Immediate,
+    Accumulator,
+    Indirect,
+    IndirectX,
+    IndirectY,
+    Absolute,
+    AbsoluteX,
+    AbsoluteY,
+    ZeroPage,
+    ZeroPageX,
+    ZeroPageY,
+}
+
+impl AdressingMode {
+    pub const fn has_arguments(&self) -> bool {
+        match self {
+            AdressingMode::Implied | AdressingMode::Accumulator => false,
+            _ => true,
+        }
+    }
+
+    // The length of an instruction, counting the identifier and arguments
+    pub const fn opcode_len(&self) -> u16 {
+        match self {
+            AdressingMode::Implied | AdressingMode::Accumulator => 1,
+
+            AdressingMode::Immediate
+            | AdressingMode::Relative
+            | AdressingMode::IndirectX
+            | AdressingMode::IndirectY
+            | AdressingMode::ZeroPage
+            | AdressingMode::ZeroPageX
+            | AdressingMode::ZeroPageY => 2,
+
+            AdressingMode::Indirect
+            | AdressingMode::Absolute
+            | AdressingMode::AbsoluteX
+            | AdressingMode::AbsoluteY => 3,
+        }
+    }
+
+    pub fn fetch_param_address(&self, cpu: &CPU) -> u16 {
+        let after_opcode = cpu.program_counter.wrapping_add(1);
+        match self {
+            AdressingMode::Immediate | AdressingMode::Relative => after_opcode,
+            AdressingMode::Absolute => cpu.read_word(after_opcode),
+            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
+
+            AdressingMode::ZeroPageX => {
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16
+            }
+
+            AdressingMode::ZeroPageY => {
+                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16
+            }
+
+            AdressingMode::AbsoluteX => cpu
+                .read_word(after_opcode)
+                .wrapping_add(cpu.register_x as u16),
+
+            AdressingMode::AbsoluteY => cpu
+                .read_word(after_opcode)
+                .wrapping_add(cpu.register_y as u16),
+
+            AdressingMode::Indirect => {
+                let ptr = cpu.read_word(after_opcode);
+                let low = cpu.read_byte(ptr as u16);
+
+                // Accomodate for a hardware bug, the 6502 reference states the following:
+                //    "An original 6502 has does not correctly fetch the target address if the indirect vector
+                //    falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case
+                //    it fetches the LSB from $xxFF as expected but takes the MSB from $xx00"
+                let high = if ptr & 0x00FF != 0xFF {
+                    cpu.read_byte(ptr.wrapping_add(1))
+                } else {
+                    cpu.read_byte(ptr & 0xFF00)
+                };
+
+                u16::from_le_bytes([low, high])
+            }
+
+            AdressingMode::IndirectX => {
+                let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
+
+                u16::from_le_bytes([
+                    cpu.read_byte(ptr as u16),
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
+                ])
+            }
+
+            AdressingMode::IndirectY => {
+                let ptr = cpu.read_byte(after_opcode);
+                u16::from_le_bytes([
+                    cpu.read_byte(ptr as u16),
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
+                ])
+                .wrapping_add(cpu.register_y as u16)
+            }
+
+            AdressingMode::Implied | AdressingMode::Accumulator => {
+                panic!("Addressing mode {} has no arguments!", self);
+            }
+        }
+    }
+}
+
 bitflags! {
+    /// See https://www.nesdev.org/wiki/Status_flags
     #[rustfmt::skip]
     #[derive(Debug, Clone, PartialEq)]
     pub struct CpuFlags: u8 {
         const CARRY =    0b0000_0001;
         const ZERO =     0b0000_0010;
         const IRQ =      0b0000_0100;
-        const DECIMAL =  0b0000_1000;
+        const DECIMAL =  0b0000_1000; // No effect
         const BREAK =    0b0001_0000;
-        const BREAK2 =   0b0010_0000;
+        const BREAK2 =   0b0010_0000; // No effect
         const OVERFLOW = 0b0100_0000;
         const NEGATIVE = 0b1000_0000;
-    }
-}
-
-impl CpuFlags {
-    const fn format(&self, flag: CpuFlags, display: char) -> char {
-        if self.contains(flag) {
-            display
-        } else {
-            '-'
-        }
-    }
-}
-
-impl fmt::Display for CpuFlags {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut string = String::with_capacity(8);
-        string.push(self.format(CpuFlags::NEGATIVE, 'N'));
-        string.push(self.format(CpuFlags::OVERFLOW, 'O'));
-        string.push(self.format(CpuFlags::BREAK2, 'B'));
-        string.push(self.format(CpuFlags::BREAK, 'B'));
-        string.push(self.format(CpuFlags::DECIMAL, 'D'));
-        string.push(self.format(CpuFlags::IRQ, 'I'));
-        string.push(self.format(CpuFlags::ZERO, 'Z'));
-        string.push(self.format(CpuFlags::CARRY, 'C'));
-        write!(f, "{}", string)
     }
 }
 
@@ -55,6 +140,7 @@ impl Default for CpuFlags {
     }
 }
 
+/// See https://www.nesdev.org/wiki/CPU
 pub struct CPU {
     pub accumulator: u8,
     pub register_x: u8,
@@ -66,7 +152,7 @@ pub struct CPU {
 }
 
 impl CPU {
-    #[allow(dead_code)] // TODO: fix
+    #[allow(dead_code)] // TODO: remove when graphics are implemented
     const RESET_VECTOR: u16 = 0xFFFC;
 
     const STACK_OFFSET: u16 = 0x0100;
@@ -98,22 +184,13 @@ impl CPU {
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
     }
 
-    /// Get the status of bit N in a u8
-    pub const fn nth_bit(value: u8, n: u8) -> bool {
-        value & (1 << n) != 0
-    }
-
-    /// Check if two values are contained on the same page in memory
-    pub const fn is_on_same_page(a: u16, b: u16) -> bool {
-        (a & 0xFF00) == (b & 0xFF00)
-    }
-
+    // Used by all branching instructions
     pub fn branch(&mut self, mode: &AdressingMode, condition: bool) -> u16 {
         if condition {
             self.tick(1);
             let offset = self.read_byte(mode.fetch_param_address(self));
 
-            // Two's complement signed offset
+            // Two's complement signed offset to branch backwards
             let new_pc = if offset > (u8::MAX / 2) {
                 self.program_counter
                     .wrapping_add(mode.opcode_len())
@@ -131,48 +208,40 @@ impl CPU {
 
             return new_pc;
         }
-        // TODO: move increment_pc()
+        // TODO: move consume_opcode()?
         self.program_counter + mode.opcode_len()
     }
 
-    pub fn stack_push_byte(&mut self, data: u8) {
+    pub fn push_byte(&mut self, data: u8) {
         self.write_byte(CPU::STACK_OFFSET + self.stack_pointer as u16, data);
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
     }
 
-    pub fn stack_pop_byte(&mut self) -> u8 {
+    pub fn pop_byte(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
         self.read_byte(CPU::STACK_OFFSET + self.stack_pointer as u16)
     }
 
-    pub fn stack_push_word(&mut self, data: u16) {
+    pub fn push_word(&mut self, data: u16) {
         // I dont understand why pushing in big-endian order makes the value be read in little-endian?
         for byte in u16::to_be_bytes(data) {
-            self.stack_push_byte(byte);
+            self.push_byte(byte);
         }
     }
 
-    pub fn stack_pop_word(&mut self) -> u16 {
-        u16::from_le_bytes([self.stack_pop_byte(), self.stack_pop_byte()])
+    pub fn pop_word(&mut self) -> u16 {
+        u16::from_le_bytes([self.pop_byte(), self.pop_byte()])
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
-        self.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
+        self.status.set(CpuFlags::NEGATIVE, Self::nth_bit(value, 7));
         self.status.set(CpuFlags::ZERO, value == 0);
-    }
-
-    fn format_instruction_bytes(&self, mode: &AdressingMode) -> String {
-        let mut bytes = String::new();
-        for i in 0..mode.opcode_len() {
-            bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
-        }
-        bytes
     }
 
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
-            let (instr, mode, cycles) = parse_instruction(opcode).expect(
+            let (instr, mode, cycles) = decode_instruction(opcode).expect(
                 format!(
                     "invalid opcode ${:02X} at PC ${:04X}",
                     opcode, self.program_counter
@@ -197,21 +266,23 @@ impl CPU {
             self.tick(*cycles as u64);
         }
     }
-}
 
-impl fmt::Display for CPU {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "A:{:02X} X:{:02X} Y:{:02X} SP:{:02X} P:{:02X} C:{5: <5} {6:}",
-            self.accumulator,
-            self.register_x,
-            self.register_y,
-            self.stack_pointer,
-            self.status,
-            self.get_cycles(),
-            self.status
-        )
+    /// Get the status of bit N in a u8
+    pub const fn nth_bit(value: u8, n: u8) -> bool {
+        value & (1 << n) != 0
+    }
+
+    /// Check if two values are contained on the same page in memory
+    pub const fn is_on_same_page(a: u16, b: u16) -> bool {
+        (a & 0xFF00) == (b & 0xFF00)
+    }
+
+    fn format_instruction_bytes(&self, mode: &AdressingMode) -> String {
+        let mut bytes = String::new();
+        for i in 0..mode.opcode_len() {
+            bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
+        }
+        bytes
     }
 }
 
@@ -236,6 +307,67 @@ impl Clock for CPU {
 
     fn set_cycles(&mut self, cycles: u64) {
         self.bus.set_cycles(cycles);
+    }
+}
+
+impl CpuFlags {
+    const fn format(&self, flag: CpuFlags, display: char) -> char {
+        if self.contains(flag) {
+            display
+        } else {
+            '-'
+        }
+    }
+}
+
+impl fmt::Display for CpuFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut string = String::with_capacity(8);
+        string.push(self.format(CpuFlags::NEGATIVE, 'N'));
+        string.push(self.format(CpuFlags::OVERFLOW, 'O'));
+        string.push(self.format(CpuFlags::BREAK2, 'B'));
+        string.push(self.format(CpuFlags::BREAK, 'B'));
+        string.push(self.format(CpuFlags::DECIMAL, 'D'));
+        string.push(self.format(CpuFlags::IRQ, 'I'));
+        string.push(self.format(CpuFlags::ZERO, 'Z'));
+        string.push(self.format(CpuFlags::CARRY, 'C'));
+        write!(f, "{}", string)
+    }
+}
+
+impl fmt::Display for CPU {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A:{:02X} X:{:02X} Y:{:02X} S:{:02X} P:{:02X} C:{5: <5} {6:}",
+            self.accumulator,
+            self.register_x,
+            self.register_y,
+            self.stack_pointer,
+            self.status,
+            self.get_cycles(),
+            self.status
+        )
+    }
+}
+
+impl fmt::Display for AdressingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Implied => write!(f, "implied"),
+            Self::Relative => write!(f, "relative"),
+            Self::Immediate => write!(f, "immediate"),
+            Self::Accumulator => write!(f, "accumulator"),
+            Self::Indirect => write!(f, "indirect"),
+            Self::IndirectX => write!(f, "indirectX"),
+            Self::IndirectY => write!(f, "indirectY"),
+            Self::Absolute => write!(f, "absolute"),
+            Self::AbsoluteX => write!(f, "absoluteX"),
+            Self::AbsoluteY => write!(f, "absoluteY"),
+            Self::ZeroPage => write!(f, "zeropage"),
+            Self::ZeroPageX => write!(f, "zeropageX"),
+            Self::ZeroPageY => write!(f, "zeropageX"),
+        }
     }
 }
 

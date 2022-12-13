@@ -1,15 +1,17 @@
 use crate::bus::Memory;
-use crate::cpu::{CpuFlags, CPU};
-use std::fmt;
+use crate::cpu::{AdressingMode, CpuFlags, CPU};
 
+// This should really be a struct instead. That would remove the need of the functions below.
 pub type Instruction = (
     &'static str,
     fn(cpu: &mut CPU, mode: &AdressingMode) -> u16,
     &'static [(u8, u8, &'static AdressingMode)],
 );
 
-/// Retrieve an instruction based on an identifier
-pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'static AdressingMode, &'static u8)> {
+/// Returns the instruction, addressing mode, and the number of cycles it takes to execute.
+pub fn decode_instruction(
+    identifier: u8,
+) -> Option<(&'static Instruction, &'static AdressingMode, &'static u8)> {
     for instr in INSTRUCTIONS.iter() {
         for (opcode, cycles, mode) in instr.2 {
             if *opcode == identifier {
@@ -20,6 +22,7 @@ pub fn parse_instruction(identifier: u8) -> Option<(&'static Instruction, &'stat
     None
 }
 
+/// Execute the function associated with an instruction.
 pub fn execute_instruction(
     cpu: &mut CPU,
     instr: &'static Instruction,
@@ -32,11 +35,8 @@ pub fn instruction_name(instr: &'static Instruction) -> &'static str {
     instr.0
 }
 
-pub fn format_instruction(
-    cpu: &CPU,
-    instr: &'static Instruction,
-    mode: &AdressingMode,
-) -> String {
+/// Format an instruction to a human-readable string, for debugging purposes.
+pub fn format_instruction(cpu: &CPU, instr: &'static Instruction, mode: &AdressingMode) -> String {
     let mut args = String::new();
 
     match mode {
@@ -64,152 +64,16 @@ pub fn format_instruction(
         }
     }
 
-    format!(
-        "{0: <3} {1: <6}",
-        instruction_name(instr),
-        args,
-    )
+    format!("{0: <3} {1: <6}", instruction_name(instr), args,)
 }
 
-/// Get the next program counter based on the adressing mode
+/// Get program counter after a instruction.
 const fn consume_opcode(pc: u16, mode: &AdressingMode) -> u16 {
     pc + mode.opcode_len()
 }
 
-/// See https://www.nesdev.org/wiki/CPU_addressing_modes
-#[derive(Debug, PartialEq)]
-pub enum AdressingMode {
-    Implied,
-    Relative,
-    Immediate,
-    Accumulator,
-    Indirect,
-    IndirectX,
-    IndirectY,
-    Absolute,
-    AbsoluteX,
-    AbsoluteY,
-    ZeroPage,
-    ZeroPageX,
-    ZeroPageY,
-}
-
-impl fmt::Display for AdressingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Implied => write!(f, "implied"),
-            Self::Relative => write!(f, "relative"),
-            Self::Immediate => write!(f, "immediate"),
-            Self::Accumulator => write!(f, "accumulator"),
-            Self::Indirect => write!(f, "indirect"),
-            Self::IndirectX => write!(f, "indirectX"),
-            Self::IndirectY => write!(f, "indirectY"),
-            Self::Absolute => write!(f, "absolute"),
-            Self::AbsoluteX => write!(f, "absoluteX"),
-            Self::AbsoluteY => write!(f, "absoluteY"),
-            Self::ZeroPage => write!(f, "zeropage"),
-            Self::ZeroPageX => write!(f, "zeropageX"),
-            Self::ZeroPageY => write!(f, "zeropageX"),
-        }
-    }
-}
-
-impl AdressingMode {
-    pub const fn has_arguments(&self) -> bool {
-        match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => false,
-            _ => true,
-        }
-    }
-
-    // The length of an instruction, counting the identifier and arguments
-    pub const fn opcode_len(&self) -> u16 {
-        match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => 1,
-
-            AdressingMode::Immediate
-            | AdressingMode::Relative
-            | AdressingMode::IndirectX
-            | AdressingMode::IndirectY
-            | AdressingMode::ZeroPage
-            | AdressingMode::ZeroPageX
-            | AdressingMode::ZeroPageY => 2,
-
-            AdressingMode::Indirect
-            | AdressingMode::Absolute
-            | AdressingMode::AbsoluteX
-            | AdressingMode::AbsoluteY => 3,
-        }
-    }
-
-    pub fn fetch_param_address(&self, cpu: &CPU) -> u16 {
-        let after_opcode = cpu.program_counter.wrapping_add(1);
-
-        match self {
-            AdressingMode::Immediate | AdressingMode::Relative => after_opcode,
-            AdressingMode::Absolute => cpu.read_word(after_opcode),
-            AdressingMode::ZeroPage => cpu.read_byte(after_opcode) as u16,
-
-            AdressingMode::ZeroPageX => {
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16
-            }
-
-            AdressingMode::ZeroPageY => {
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16
-            }
-
-            AdressingMode::AbsoluteX => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_x as u16),
-
-            AdressingMode::AbsoluteY => cpu
-                .read_word(after_opcode)
-                .wrapping_add(cpu.register_y as u16),
-
-            AdressingMode::Indirect => {
-                let ptr = cpu.read_word(after_opcode);
-                let low = cpu.read_byte(ptr as u16);
-
-                // Accomodate for a hardware bug, the 6502 reference states the following:
-                //    "An original 6502 has does not correctly fetch the target address if the indirect vector
-                //    falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case
-                //    it fetches the LSB from $xxFF as expected but takes the MSB from $xx00"
-                let high = if ptr & 0x00FF != 0xFF {
-                    cpu.read_byte(ptr.wrapping_add(1))
-                } else {
-                    cpu.read_byte(ptr & 0xFF00)
-                };
-
-                u16::from_le_bytes([low, high])
-            }
-
-            AdressingMode::IndirectX => {
-                let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
-
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ])
-            }
-
-            AdressingMode::IndirectY => {
-                let ptr = cpu.read_byte(after_opcode);
-                u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ])
-                .wrapping_add(cpu.register_y as u16)
-            }
-
-            AdressingMode::Implied | AdressingMode::Accumulator => {
-                panic!("Addressing mode {} has no arguments!", self);
-            }
-        }
-    }
-}
-
-#[rustfmt::skip]
 /// See https://www.nesdev.org/obelisk-6502-guide/reference.html
+#[rustfmt::skip]
 pub const INSTRUCTIONS: [Instruction; 64] = [
     ("BRK", opcodes::brk, &[(0x00, 7, &AdressingMode::Implied)]),
     ("RTI", opcodes::rti, &[(0x40, 6, &AdressingMode::Implied)]),
@@ -560,7 +424,7 @@ mod opcodes {
     }
 
     pub fn brk(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        // Let the callee handle this
+        // TODO: this is not correct, should execute code from the BRK vector
         consume_opcode(cpu.program_counter, mode)
     }
 
@@ -590,11 +454,11 @@ mod opcodes {
     }
 
     pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) -> u16 {
-        cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+        cpu.status = CpuFlags::from_bits_truncate(cpu.pop_byte());
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         cpu.status.remove(CpuFlags::BREAK);
         cpu.status.insert(CpuFlags::BREAK2);
-        cpu.stack_pop_word()
+        cpu.pop_word()
     }
 
     pub fn adc(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
@@ -721,12 +585,12 @@ mod opcodes {
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         status.insert(CpuFlags::BREAK);
         status.insert(CpuFlags::BREAK2);
-        cpu.stack_push_byte(status.bits());
+        cpu.push_byte(status.bits());
         consume_opcode(cpu.program_counter, mode)
     }
 
     pub fn plp(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        cpu.status = CpuFlags::from_bits_truncate(cpu.stack_pop_byte());
+        cpu.status = CpuFlags::from_bits_truncate(cpu.pop_byte());
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
         cpu.status.remove(CpuFlags::BREAK);
         cpu.status.insert(CpuFlags::BREAK2);
@@ -734,12 +598,12 @@ mod opcodes {
     }
 
     pub fn pha(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        cpu.stack_push_byte(cpu.accumulator);
+        cpu.push_byte(cpu.accumulator);
         consume_opcode(cpu.program_counter, mode)
     }
 
     pub fn pla(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
-        cpu.accumulator = cpu.stack_pop_byte();
+        cpu.accumulator = cpu.pop_byte();
         cpu.update_zero_and_negative_flags(cpu.accumulator);
         consume_opcode(cpu.program_counter, mode)
     }
@@ -805,12 +669,12 @@ mod opcodes {
 
     pub fn jsr(cpu: &mut CPU, mode: &AdressingMode) -> u16 {
         let addr = mode.fetch_param_address(cpu);
-        cpu.stack_push_word(consume_opcode(cpu.program_counter, mode) - 1);
+        cpu.push_word(consume_opcode(cpu.program_counter, mode) - 1);
         addr
     }
 
     pub fn rts(cpu: &mut CPU, _: &AdressingMode) -> u16 {
-        let addr = cpu.stack_pop_word();
+        let addr = cpu.pop_word();
         addr + 1
     }
 

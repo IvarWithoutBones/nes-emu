@@ -33,10 +33,9 @@
         - Begin all over again until the end of the string is reached
 */
 
-use crate::cpu::instructions::*;
+use crate::cpu::{instructions::*, AdressingMode};
 
 #[allow(dead_code)]
-
 
 pub fn run() {
     let instr = fetch_instruction("LDA").unwrap();
