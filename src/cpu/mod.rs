@@ -424,7 +424,7 @@ mod test {
         assert_eq!(cpu.register_x, 0);
         assert_eq!(cpu.register_y, 0);
         assert_eq!(cpu.program_counter, PROGRAM_ROM_START);
-        assert_eq!(cpu.status, CpuFlags::empty());
+        assert_eq!(cpu.status, CpuFlags::default());
     });
 
     test_cpu!(test_jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
@@ -599,7 +599,7 @@ mod test {
 
     test_cpu!(test_lda, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
         assert_eq!(cpu.accumulator, 5);
-        assert_eq!(cpu.status, CpuFlags::empty());
+        assert_eq!(cpu.status, CpuFlags::default());
     });
 
     test_cpu!(
@@ -615,12 +615,12 @@ mod test {
 
     test_cpu!(test_ldy, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_y, 5);
-        assert_eq!(cpu.status, CpuFlags::empty());
+        assert_eq!(cpu.status, CpuFlags::default());
     });
 
     test_cpu!(test_ldx, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_x, 5);
-        assert_eq!(cpu.status, CpuFlags::empty());
+        assert_eq!(cpu.status, CpuFlags::default());
     });
 
     test_cpu!(test_read_write_word, |cpu: &mut CPU| {

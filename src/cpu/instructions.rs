@@ -144,7 +144,7 @@ pub const INSTRUCTIONS: [Instruction; 64] = [
         (0x2C, 4, &AdressingMode::Absolute),
     ]),
 
-    ("JMP",opcodes::jmp, &[
+    ("JMP", opcodes::jmp, &[
         (0x4C, 3, &AdressingMode::Absolute),
         (0x6C, 5, &AdressingMode::Indirect),
     ]),
