@@ -1,4 +1,4 @@
-rec {
+{
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
@@ -19,9 +19,24 @@ rec {
 
       nes-emu = pkgs.callPackage
         ({ lib
+         , stdenvNoCC
          , rustPlatform
+           # Linux specific
+         , cmake
+         , pkg-config
+         , libxkbcommon
+         , libGL
+         , fontconfig
+         , wayland
+         , libXcursor
+         , libXrandr
+         , libXi
+         , libX11
+           # Darwin specific
+         , AppKit
+         , OpenGL
          }:
-          rustPlatform.buildRustPackage {
+          rustPlatform.buildRustPackage rec {
             pname = "nes-emu";
             version =
               let
@@ -39,12 +54,35 @@ rec {
 
             cargoLock.lockFile = ./Cargo.lock;
 
+            nativeBuildInputs = [
+              rust
+            ] ++ lib.optionals stdenvNoCC.hostPlatform.isLinux [
+              cmake
+              pkg-config
+            ];
+
+            buildInputs = lib.optionals stdenvNoCC.hostPlatform.isLinux [
+              libX11
+              libXrandr
+              libXcursor
+              libxkbcommon
+              libXi
+              libGL
+              fontconfig
+              wayland
+            ] ++ lib.optionals stdenvNoCC.hostPlatform.isDarwin [
+              AppKit
+              OpenGL
+            ];
+
+            LD_LIBRARY_PATH = lib.optional stdenvNoCC.hostPlatform.isLinux (lib.makeLibraryPath buildInputs);
+
             meta = with lib; {
               license = licenses.asl20;
               platforms = platforms.unix;
             };
           })
-        { };
+        { inherit (pkgs.darwin.apple_sdk.frameworks) AppKit OpenGL; };
     in
     {
       packages = {
