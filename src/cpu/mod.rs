@@ -4,7 +4,7 @@ mod instructions;
 use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
 use instructions::Instruction;
-use std::fmt;
+use std::{fmt, sync::mpsc::Sender};
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 #[derive(Debug, PartialEq)]
@@ -62,12 +62,12 @@ impl AdressingMode {
 
             Self::ZeroPageX => (
                 cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16,
-                false
+                false,
             ),
 
             Self::ZeroPageY => (
                 cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16,
-                false
+                false,
             ),
 
             Self::AbsoluteX => {
@@ -103,7 +103,7 @@ impl AdressingMode {
                 let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
                 let addr = u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16)
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
                 ]);
                 (addr, false)
             }
@@ -112,7 +112,7 @@ impl AdressingMode {
                 let ptr = cpu.read_byte(after_opcode);
                 let addr_base = u16::from_le_bytes([
                     cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16)
+                    cpu.read_byte(ptr.wrapping_add(1) as u16),
                 ]);
                 let addr = addr_base.wrapping_add(cpu.register_y as u16);
                 (addr, CPU::is_on_different_page(addr_base, addr))
@@ -224,6 +224,36 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
+    pub fn run_with(&mut self, sender: Sender<String>) {
+        loop {
+            let opcode = self.read_byte(self.program_counter);
+            let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
+                format!(
+                    "invalid opcode ${:02X} at PC ${:04X}",
+                    opcode, self.program_counter
+                )
+                .as_str(),
+            );
+
+            sender.send(instr.format(self, mode)).unwrap();
+
+            if instr.name == "BRK" {
+                // TODO: properly implement
+                break;
+            };
+
+            let program_counter_prior = self.program_counter;
+            (instr.function)(self, mode);
+            if self.program_counter == program_counter_prior {
+                // Some instructions (e.g. JMP) set the program counter themselves
+                self.program_counter += mode.len();
+            }
+
+            self.tick(*cycles as u64);
+        }
+    }
+
+    #[allow(dead_code)] // TODO: remove when GUI is stabalised
     pub fn run(&mut self) {
         loop {
             let opcode = self.read_byte(self.program_counter);
