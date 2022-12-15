@@ -21,7 +21,7 @@ struct Args {
 }
 
 fn main() {
-    let (sender, receiver) = channel();
+    let (instruction_sender, instruction_receiver) = channel();
     let args = Args::parse();
 
     let cart = Cartridge::from_path(&args.rom).unwrap_or_else(|e| {
@@ -30,18 +30,24 @@ fn main() {
     });
 
     let bus: Bus = Bus::new(cart, args.quiet);
-    let mut cpu = CPU::new(bus);
-    cpu.reset();
 
     thread::spawn(move || {
+        let mut cpu = CPU::new(bus);
+        cpu.reset();
+
         loop {
-            let state = cpu.step();
-            if sender.send(state).is_err() {
-                // GUI has died, so the CPU should too.
+            if let Some(instr_state) = cpu.step() {
+                let ptr = Box::new(instr_state);
+                if instruction_sender.send(ptr).is_err() {
+                    // GUI has died, so the CPU should too.
+                    break;
+                };
+            } else {
+                // Some sort of error occured, should communicate to the GUI in the future.
                 break;
-            };
+            }
         }
     });
 
-    Gui::run("NES emu", receiver);
+    Gui::run("NES emu", instruction_receiver);
 }

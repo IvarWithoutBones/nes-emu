@@ -4,7 +4,7 @@ mod instructions;
 use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
 use bitflags::bitflags;
 use instructions::Instruction;
-use std::{fmt, sync::mpsc::Sender};
+use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 #[derive(Debug, PartialEq)]
