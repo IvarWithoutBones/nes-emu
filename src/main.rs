@@ -34,7 +34,13 @@ fn main() {
     cpu.reset();
 
     thread::spawn(move || {
-        cpu.run_with(sender);
+        loop {
+            let state = cpu.step();
+            if sender.send(state).is_err() {
+                // GUI has died, so the CPU should too.
+                break;
+            };
+        }
     });
 
     Gui::run("NES emu", receiver);

@@ -154,6 +154,16 @@ impl Default for CpuFlags {
     }
 }
 
+pub struct InstructionState {
+    pub formatted: String,
+    pub accumulator: u8,
+    pub register_x: u8,
+    pub register_y: u8,
+    pub program_counter: u16,
+    pub stack_pointer: u8,
+    pub status: CpuFlags,
+}
+
 /// See https://www.nesdev.org/wiki/CPU
 pub struct CPU {
     pub accumulator: u8,
@@ -224,33 +234,40 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
-    pub fn run_with(&mut self, sender: Sender<String>) {
-        loop {
-            let opcode = self.read_byte(self.program_counter);
-            let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
-                format!(
-                    "invalid opcode ${:02X} at PC ${:04X}",
-                    opcode, self.program_counter
-                )
-                .as_str(),
-            );
+    pub fn step(&mut self) -> Option<InstructionState> {
+        let opcode = self.read_byte(self.program_counter);
+        let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
+            format!(
+                "invalid opcode ${:02X} at PC ${:04X}",
+                opcode, self.program_counter
+            )
+            .as_str(),
+        );
 
-            sender.send(instr.format(self, mode)).unwrap();
+        let state = InstructionState {
+            formatted: instr.format(self, mode),
+            accumulator: self.accumulator,
+            register_x: self.register_x,
+            register_y: self.register_y,
+            program_counter: self.program_counter,
+            stack_pointer: self.stack_pointer,
+            status: self.status.clone(),
+        };
 
-            if instr.name == "BRK" {
-                // TODO: properly implement
-                break;
-            };
-
-            let program_counter_prior = self.program_counter;
-            (instr.function)(self, mode);
-            if self.program_counter == program_counter_prior {
-                // Some instructions (e.g. JMP) set the program counter themselves
-                self.program_counter += mode.len();
-            }
-
-            self.tick(*cycles as u64);
+        if instr.name == "BRK" {
+            // TODO: this is a hack
+            return None;
         }
+
+        let program_counter_prior = self.program_counter;
+        (instr.function)(self, mode);
+        if self.program_counter == program_counter_prior {
+            // Some instructions (e.g. JMP) set the program counter themselves
+            self.program_counter += mode.len();
+        }
+
+        self.tick(*cycles as u64);
+        Some(state)
     }
 
     #[allow(dead_code)] // TODO: remove when GUI is stabalised

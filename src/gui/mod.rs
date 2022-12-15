@@ -1,21 +1,21 @@
+use crate::cpu::InstructionState;
 use eframe::egui;
 use std::sync::mpsc::Receiver;
 
-#[derive(Default)]
 pub struct Gui {
-    receiver: Option<Receiver<String>>,
-    instructions: Vec<String>,
+    receiver: Receiver<Option<InstructionState>>,
+    instructions: Vec<InstructionState>,
 }
 
 impl Gui {
-    pub fn new(receiver: Receiver<String>) -> Self {
+    pub fn new(receiver: Receiver<Option<InstructionState>>) -> Self {
         Self {
-            receiver: Some(receiver),
+            receiver,
             instructions: Vec::new(),
         }
     }
 
-    pub fn run(window_title: &str, receiver: Receiver<String>) {
+    pub fn run(window_title: &str, receiver: Receiver<Option<InstructionState>>) {
         let options = eframe::NativeOptions::default();
         eframe::run_native(
             window_title,
@@ -25,6 +25,7 @@ impl Gui {
     }
 
     fn disassembly_ui(&self, ui: &mut egui::Ui) {
+        ui.spacing();
         ui.heading(egui::RichText::new("Disassembly").strong());
         ui.separator();
 
@@ -35,7 +36,9 @@ impl Gui {
             .stick_to_bottom(true)
             .show_rows(ui, row_height, self.instructions.len(), |ui, row_range| {
                 for row in row_range {
-                    ui.label(self.instructions.get(row).unwrap());
+                    if let Some(instruction) = self.instructions.get(row) {
+                        ui.label(instruction.formatted.clone());
+                    }
                 }
             });
     }
@@ -44,22 +47,31 @@ impl Gui {
         ui.heading(egui::RichText::new("Registers").strong());
         ui.separator();
 
+        // TODO: dont hardcode latest
+        let instr = self.instructions.last();
+        if instr.is_none() {
+            return;
+        }
+        let instr = instr.unwrap();
+
         egui::Grid::new("registers").show(ui, |ui| {
-            grid_label(ui, "A", "00");
-            grid_label(ui, "X", "00");
-            grid_label(ui, "Y", "00");
-            grid_label(ui, "SP", "00");
+            grid_label(ui, "A", instr.accumulator);
+            grid_label(ui, "X", instr.register_x);
+            grid_label(ui, "Y", instr.register_y);
+            grid_label(ui, "SP", instr.stack_pointer);
         });
+    }
+
+    fn update_instruction_cache(&mut self) {
+        while let Ok(Some(instruction)) = self.receiver.try_recv() {
+            self.instructions.push(instruction);
+        }
     }
 }
 
 impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(receiver) = &self.receiver {
-            while let Ok(instruction) = receiver.try_recv() {
-                self.instructions.push(instruction);
-            }
-        }
+        self.update_instruction_cache();
 
         egui::SidePanel::left("disassembly").show(ctx, |ui| self.disassembly_ui(ui));
         egui::CentralPanel::default().show(ctx, |ui| self.registers_ui(ui));
@@ -69,8 +81,8 @@ impl eframe::App for Gui {
     }
 }
 
-fn grid_label(ui: &mut egui::Ui, first: &str, second: &str) {
+fn grid_label(ui: &mut egui::Ui, first: &str, second: u8) {
     ui.label(first);
-    ui.label(second);
+    ui.label(format!("{:02X}", second));
     ui.end_row();
 }
