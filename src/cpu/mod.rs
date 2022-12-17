@@ -1,4 +1,5 @@
-pub mod assembler;
+mod addressing_mode;
+mod assembler;
 mod instructions;
 
 use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
@@ -6,129 +7,15 @@ use bitflags::bitflags;
 use instructions::Instruction;
 use std::fmt;
 
-/// See https://www.nesdev.org/wiki/CPU_addressing_modes
-#[derive(Debug, PartialEq)]
-pub enum AdressingMode {
-    Implied,
-    Relative,
-    Immediate,
-    Accumulator,
-    Indirect,
-    IndirectX,
-    IndirectY,
-    Absolute,
-    AbsoluteX,
-    AbsoluteY,
-    ZeroPage,
-    ZeroPageX,
-    ZeroPageY,
-}
-
-impl AdressingMode {
-    pub const fn has_arguments(&self) -> bool {
-        match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => false,
-            _ => true,
-        }
-    }
-
-    /// The length of an instruction, counting the identifier and arguments
-    pub const fn len(&self) -> u16 {
-        match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => 1,
-
-            AdressingMode::Immediate
-            | AdressingMode::Relative
-            | AdressingMode::IndirectX
-            | AdressingMode::IndirectY
-            | AdressingMode::ZeroPage
-            | AdressingMode::ZeroPageX
-            | AdressingMode::ZeroPageY => 2,
-
-            AdressingMode::Indirect
-            | AdressingMode::Absolute
-            | AdressingMode::AbsoluteX
-            | AdressingMode::AbsoluteY => 3,
-        }
-    }
-
-    /// Fetch the address of the operand. Returns the address and a flag indicating if a page boundary was crossed
-    pub fn fetch_param_address(&self, cpu: &CPU) -> (u16, bool) {
-        let after_opcode = cpu.program_counter.wrapping_add(1);
-        match self {
-            Self::Immediate | Self::Relative => (after_opcode, false),
-            Self::Absolute => (cpu.read_word(after_opcode), false),
-            Self::ZeroPage => (cpu.read_byte(after_opcode) as u16, false),
-
-            Self::ZeroPageX => (
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_x) as u16,
-                false,
-            ),
-
-            Self::ZeroPageY => (
-                cpu.read_byte(after_opcode).wrapping_add(cpu.register_y) as u16,
-                false,
-            ),
-
-            Self::AbsoluteX => {
-                let addr_base = cpu.read_word(after_opcode);
-                let addr = addr_base.wrapping_add(cpu.register_x as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
-            }
-
-            Self::AbsoluteY => {
-                let addr_base = cpu.read_word(after_opcode);
-                let addr = addr_base.wrapping_add(cpu.register_y as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
-            }
-
-            Self::Indirect => {
-                let ptr = cpu.read_word(after_opcode);
-                let low = cpu.read_byte(ptr as u16);
-
-                // Accomodate for a hardware bug, the 6502 reference states the following:
-                //    "An original 6502 has does not correctly fetch the target address if the indirect vector
-                //    falls on a page boundary (e.g. $xxFF where xx is any value from $00 to $FF). In this case
-                //    it fetches the LSB from $xxFF as expected but takes the MSB from $xx00"
-                let high = if ptr & 0x00FF == 0xFF {
-                    cpu.read_byte(ptr & 0xFF00)
-                } else {
-                    cpu.read_byte(ptr.wrapping_add(1))
-                };
-
-                (u16::from_le_bytes([low, high]), false)
-            }
-
-            Self::IndirectX => {
-                let ptr = cpu.read_byte(after_opcode).wrapping_add(cpu.register_x);
-                let addr = u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ]);
-                (addr, false)
-            }
-
-            Self::IndirectY => {
-                let ptr = cpu.read_byte(after_opcode);
-                let addr_base = u16::from_le_bytes([
-                    cpu.read_byte(ptr as u16),
-                    cpu.read_byte(ptr.wrapping_add(1) as u16),
-                ]);
-                let addr = addr_base.wrapping_add(cpu.register_y as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
-            }
-
-            _ => {
-                panic!("Addressing mode {} has no arguments!", self);
-            }
-        }
-    }
-
-    /// Fetch the operand. Returns the operand and a flag indicating if a page boundary was crossed.
-    pub fn fetch_param(&self, cpu: &CPU) -> (u8, bool) {
-        let (addr, page_crossed) = self.fetch_param_address(cpu);
-        (cpu.read_byte(addr), page_crossed)
-    }
+/// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
+pub struct CpuState {
+    pub formatted: String,
+    pub accumulator: u8,
+    pub register_x: u8,
+    pub register_y: u8,
+    pub program_counter: u16,
+    pub stack_pointer: u8,
+    pub status: CpuFlags,
 }
 
 bitflags! {
@@ -149,19 +36,9 @@ bitflags! {
 
 impl Default for CpuFlags {
     fn default() -> CpuFlags {
-        // Self::IRQ | Self::BREAK | Self::BREAK2
-        Self::IRQ | Self::BREAK2 // Hack to diff against nestest log, above is correct
+        Self::IRQ | Self::BREAK | Self::BREAK2
+        // Self::IRQ | Self::BREAK2 // Hack to diff against nestest log, above is correct
     }
-}
-
-pub struct InstructionState {
-    pub formatted: String,
-    pub accumulator: u8,
-    pub register_x: u8,
-    pub register_y: u8,
-    pub program_counter: u16,
-    pub stack_pointer: u8,
-    pub status: CpuFlags,
 }
 
 /// See https://www.nesdev.org/wiki/CPU
@@ -209,7 +86,17 @@ impl CPU {
         // This is a hack to skip graphic init in nestest
         self.program_counter = 0xC000;
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
-        tracing::info!("reset to PC ${:04X}", self.program_counter);
+        tracing::info!("resetting. PC={:04X}", self.program_counter);
+    }
+
+    /// Get the status of bit N
+    pub const fn nth_bit(value: u8, n: u8) -> bool {
+        value & (1 << n) != 0
+    }
+
+    /// Check if two values are contained on a different page in memory
+    pub const fn is_on_different_page(a: u16, b: u16) -> bool {
+        (a & 0xFF00) != (b & 0xFF00)
     }
 
     pub fn push_byte(&mut self, data: u8) {
@@ -241,7 +128,7 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
-    pub fn step(&mut self) -> Option<InstructionState> {
+    pub fn step(&mut self) -> Option<CpuState> {
         let _span = tracing::span!(tracing::Level::INFO, CPU::SPAN_NAME).entered();
         let opcode = self.read_byte(self.program_counter);
         let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
@@ -252,7 +139,7 @@ impl CPU {
             .as_str(),
         );
 
-        let state = InstructionState {
+        let state = CpuState {
             formatted: instr.format(self, mode),
             accumulator: self.accumulator,
             register_x: self.register_x,
@@ -261,7 +148,6 @@ impl CPU {
             stack_pointer: self.stack_pointer,
             status: self.status.clone(),
         };
-        tracing::debug!("{}", state);
 
         if instr.name == "BRK" {
             // TODO: this is a hack
@@ -275,60 +161,10 @@ impl CPU {
             self.program_counter += mode.len();
         }
 
+        tracing::debug!("{}  {}", self, state.formatted);
+
         self.tick(*cycles as u64);
         Some(state)
-    }
-
-    #[allow(dead_code)] // TODO: remove when GUI is stabalised
-    pub fn run(&mut self) {
-        loop {
-            let opcode = self.read_byte(self.program_counter);
-            let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
-                format!(
-                    "invalid opcode ${:02X} at PC ${:04X}",
-                    opcode, self.program_counter
-                )
-                .as_str(),
-            );
-
-            // TODO: do this from a callback to make it more flexible
-            let mut bytes = String::new();
-            for i in 0..mode.len() {
-                bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
-            }
-
-            println!(
-                "{:04X}  {1: <9} {2:}  {3:}",
-                self.program_counter,
-                bytes,
-                self,
-                instr.format(self, mode)
-            );
-
-            if instr.name == "BRK" {
-                // TODO: properly implement
-                break;
-            };
-
-            let program_counter_prior = self.program_counter;
-            (instr.function)(self, mode);
-            if self.program_counter == program_counter_prior {
-                // Some instructions (e.g. JMP) set the program counter themselves
-                self.program_counter += mode.len();
-            }
-
-            self.tick(*cycles as u64);
-        }
-    }
-
-    /// Get the status of bit N
-    pub const fn nth_bit(value: u8, n: u8) -> bool {
-        value & (1 << n) != 0
-    }
-
-    /// Check if two values are contained on a different page in memory
-    pub const fn is_on_different_page(a: u16, b: u16) -> bool {
-        (a & 0xFF00) != (b & 0xFF00)
     }
 }
 
@@ -385,7 +221,8 @@ impl fmt::Display for CPU {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} C:{5: <5} {6:}",
+            "{:04X}  A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} C:{6: <5} {7:}",
+            self.program_counter,
             self.accumulator,
             self.register_x,
             self.register_y,
@@ -397,45 +234,21 @@ impl fmt::Display for CPU {
     }
 }
 
-impl fmt::Display for InstructionState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} {}  {}",
-            self.accumulator,
-            self.register_x,
-            self.register_y,
-            self.status,
-            self.stack_pointer,
-            self.status,
-            self.formatted
-        )
-    }
-}
-
-impl fmt::Display for AdressingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Implied => write!(f, "implied"),
-            Self::Relative => write!(f, "relative"),
-            Self::Immediate => write!(f, "immediate"),
-            Self::Accumulator => write!(f, "accumulator"),
-            Self::Indirect => write!(f, "indirect"),
-            Self::IndirectX => write!(f, "indirectX"),
-            Self::IndirectY => write!(f, "indirectY"),
-            Self::Absolute => write!(f, "absolute"),
-            Self::AbsoluteX => write!(f, "absoluteX"),
-            Self::AbsoluteY => write!(f, "absoluteY"),
-            Self::ZeroPage => write!(f, "zeropage"),
-            Self::ZeroPageX => write!(f, "zeropageX"),
-            Self::ZeroPageY => write!(f, "zeropageX"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn run_cpu(cpu: &mut CPU) {
+        loop {
+            if let Some(state) = cpu.step() {
+                // Unfortunately tracing doesn't seem to want to cooperate with tests.
+                // It'll print the logs even for passing tests, which clutters the output.
+                println!("{}  {}", cpu, state.formatted);
+            } else {
+                break;
+            }
+        }
+    }
 
     #[test]
     fn test_nth_bit() {
@@ -455,7 +268,7 @@ mod test {
             #[test]
             fn $test_name() {
                 let mut cpu = CPU::new(Bus::new_dummy($asm.to_vec()));
-                cpu.run();
+                run_cpu(&mut cpu);
                 $callback(cpu);
             }
         };
@@ -477,7 +290,7 @@ mod test {
         };
     }
 
-    test_cpu!(test_cpu_init, |cpu: &mut CPU| {
+    test_cpu!(cpu_init, |cpu: &mut CPU| {
         assert_eq!(cpu.accumulator, 0);
         assert_eq!(cpu.register_x, 0);
         assert_eq!(cpu.register_y, 0);
@@ -485,215 +298,185 @@ mod test {
         assert_eq!(cpu.status, CpuFlags::default());
     });
 
-    test_cpu!(test_jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
+    test_cpu!(jmp, [0x4C, 0x10, 0x00 /* JMP 0x0010 */], |cpu: CPU| {
         assert_eq!(cpu.program_counter, 0x0010);
     });
 
-    test_cpu!(test_jsr, [0x20, 0x10, 0x00 /* JSR 0x0010 */], |cpu: CPU| {
+    test_cpu!(jsr, [0x20, 0x10, 0x00 /* JSR 0x0010 */], |cpu: CPU| {
         assert_eq!(cpu.program_counter, 0x0010);
     });
 
     test_cpu!(
-        test_jsr_ldx,
+        jsr_ldx,
         [0x20, 0x53, 0x12 /* JSR 0x1253 */,],
         true,
         |cpu: &mut CPU| {
             cpu.write_byte(0x1253, 0xA2); // LDX
             cpu.write_byte(0x1254, 0x23); // #0x23
-            cpu.run();
+            run_cpu(cpu);
             assert_eq!(cpu.program_counter, 0x1255);
             assert_eq!(cpu.register_x, 0x23);
         }
     );
 
     test_cpu!(
-        test_jsr_rts,
+        jsr_rts,
         [0x20, 0x53, 0x12 /* JSR 0x1253 */,],
         true,
         |cpu: &mut CPU| {
             cpu.write_byte(0x1253, 0xA0); // LDY
             cpu.write_byte(0x1254, 0xFF); // #0xFF
             cpu.write_byte(0x1255, 0x60); // RTS
-            cpu.run();
+            run_cpu(cpu);
             assert_eq!(cpu.program_counter, 0x8003);
             assert_eq!(cpu.register_y, 0xFF);
         }
     );
 
     test_cpu!(
-        test_jmp_indirect,
+        jmp_indirect,
         [0x6C, 0xff, 0x00 /* JMP 0x00ff */],
         true,
         |cpu: &mut CPU| {
             cpu.write_byte(0x00ff, 0x00);
-            cpu.run();
+            run_cpu(cpu);
             assert_eq!(cpu.program_counter, 0x0000)
         }
     );
 
-    test_cpu!(
-        test_and,
-        [0x29, 234 /*  AND, 234 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.accumulator = 0b1010;
-            cpu.run();
-            assert_eq!(cpu.accumulator, 0b1010 & 234);
-        }
-    );
+    test_cpu!(and, [0x29, 234 /*  AND, 234 */], true, |cpu: &mut CPU| {
+        cpu.accumulator = 0b1010;
+        run_cpu(cpu);
+        assert_eq!(cpu.accumulator, 0b1010 & 234);
+    });
 
-    test_cpu!(
-        test_ora,
-        [0x09, 123 /* ORA, 123 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.accumulator = 0b1010;
-            cpu.run();
-            assert_eq!(cpu.accumulator, 0b1010 | 123);
-        }
-    );
+    test_cpu!(ora, [0x09, 123 /* ORA, 123 */], true, |cpu: &mut CPU| {
+        cpu.accumulator = 0b1010;
+        run_cpu(cpu);
+        assert_eq!(cpu.accumulator, 0b1010 | 123);
+    });
 
-    test_cpu!(
-        test_eor,
-        [0x49, 123 /* EOR, 123 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.accumulator = 0b1010;
-            cpu.run();
-            assert_eq!(cpu.accumulator, 0b1010 ^ 123);
-        }
-    );
+    test_cpu!(eor, [0x49, 123 /* EOR, 123 */], true, |cpu: &mut CPU| {
+        cpu.accumulator = 0b1010;
+        run_cpu(cpu);
+        assert_eq!(cpu.accumulator, 0b1010 ^ 123);
+    });
 
-    test_cpu!(test_inx, [0xe8 /* INX */], true, |cpu: &mut CPU| {
+    test_cpu!(inx, [0xe8 /* INX */], true, |cpu: &mut CPU| {
         cpu.register_x = 5;
-        cpu.run();
+        run_cpu(cpu);
         assert_eq!(cpu.register_x, 6);
     });
 
-    test_cpu!(test_iny, [0xc8 /* INY */], true, |cpu: &mut CPU| {
+    test_cpu!(iny, [0xc8 /* INY */], true, |cpu: &mut CPU| {
         cpu.register_y = 0xff;
-        cpu.run();
+        run_cpu(cpu);
         assert_eq!(cpu.register_y, 0);
     });
 
-    test_cpu!(
-        test_inc,
-        [0xe6, 0x10 /* INC, 0x10 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.write_byte(0x10, 1);
-            cpu.run();
-            assert_eq!(cpu.read_byte(0x10), 2);
-            assert!(!cpu.status.contains(CpuFlags::ZERO));
-            assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
-        }
-    );
+    test_cpu!(inc, [0xe6, 0x10 /* INC, 0x10 */], true, |cpu: &mut CPU| {
+        cpu.write_byte(0x10, 1);
+        run_cpu(cpu);
+        assert_eq!(cpu.read_byte(0x10), 2);
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+    });
 
-    test_cpu!(test_tax, [0xaa /* TAX */], true, |cpu: &mut CPU| {
+    test_cpu!(tax, [0xaa /* TAX */], true, |cpu: &mut CPU| {
         cpu.accumulator = 5;
-        cpu.run();
+        run_cpu(cpu);
         assert_eq!(cpu.register_x, 5);
     });
 
     test_cpu!(
-        test_multiple_ops,
+        multiple_ops,
         [0xa9, 0xc0, /* LDA, 0xc0 */ 0xaa, /* TAX */ 0xe8 /* TAX */],
         |cpu: CPU| { assert_eq!(cpu.register_x, 0xc1) }
     );
 
-    test_cpu!(
-        test_dec,
-        [0xc6, 0x10 /* DEC, 0x10 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.write_byte(0x10, 0x1);
-            cpu.run();
-            assert_eq!(cpu.read_byte(0x10), 0);
-            assert!(cpu.status.contains(CpuFlags::ZERO));
-        }
-    );
+    test_cpu!(dec, [0xc6, 0x10 /* DEC, 0x10 */], true, |cpu: &mut CPU| {
+        cpu.write_byte(0x10, 0x1);
+        run_cpu(cpu);
+        assert_eq!(cpu.read_byte(0x10), 0);
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+    });
 
-    test_cpu!(test_dey, [0x88 /* DEY */], true, |cpu: &mut CPU| {
+    test_cpu!(dey, [0x88 /* DEY */], true, |cpu: &mut CPU| {
         cpu.register_y = 10;
-        cpu.run();
+        run_cpu(cpu);
         assert_eq!(cpu.register_y, 9);
     });
 
-    test_cpu!(test_dex, [0xCA /* DEX */], true, |cpu: &mut CPU| {
+    test_cpu!(dex, [0xCA /* DEX */], true, |cpu: &mut CPU| {
         cpu.register_x = 0;
-        cpu.run();
+        run_cpu(cpu);
         assert_eq!(cpu.register_x, 0xff);
     });
 
-    test_cpu!(test_cpx, [0xe0, 10 /* CPX, 10 */], true, |cpu: &mut CPU| {
+    test_cpu!(cpx, [0xe0, 10 /* CPX, 10 */], true, |cpu: &mut CPU| {
         cpu.register_x = 10;
-        cpu.run();
+        run_cpu(cpu);
         assert!(cpu.status.contains(CpuFlags::CARRY));
         assert!(cpu.status.contains(CpuFlags::ZERO));
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
     });
 
-    test_cpu!(test_cpy, [0xc0, 10 /* CPY, 10 */], true, |cpu: &mut CPU| {
+    test_cpu!(cpy, [0xc0, 10 /* CPY, 10 */], true, |cpu: &mut CPU| {
         cpu.register_y = 9;
-        cpu.run();
+        run_cpu(cpu);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
     });
 
-    test_cpu!(
-        test_cmp,
-        [0xc5, 0x56 /* CMP, 0x56 */],
-        true,
-        |cpu: &mut CPU| {
-            cpu.write_byte(0x56, 10);
-            cpu.accumulator = 10;
-            cpu.run();
-            assert!(cpu.status.contains(CpuFlags::CARRY));
-            assert!(cpu.status.contains(CpuFlags::ZERO));
-            assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
-        }
-    );
+    test_cpu!(cmp, [0xc5, 0x56 /* CMP, 0x56 */], true, |cpu: &mut CPU| {
+        cpu.write_byte(0x56, 10);
+        cpu.accumulator = 10;
+        run_cpu(cpu);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+    });
 
-    test_cpu!(test_lda, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
+    test_cpu!(lda, [0xa9, 5 /* LDA, 5 */], |cpu: CPU| {
         assert_eq!(cpu.accumulator, 5);
         assert_eq!(cpu.status, CpuFlags::default());
     });
 
     test_cpu!(
-        test_lda_from_memory,
+        lda_from_memory,
         [0xa5, 0x55 /* LDA, 0x55 */],
         true,
         |cpu: &mut CPU| {
             cpu.write_byte(0x55, 10);
-            cpu.run();
+            run_cpu(cpu);
             assert_eq!(cpu.accumulator, 10);
         }
     );
 
-    test_cpu!(test_ldy, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
+    test_cpu!(ldy, [0xa0, 5 /* LDY, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_y, 5);
         assert_eq!(cpu.status, CpuFlags::default());
     });
 
-    test_cpu!(test_ldx, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
+    test_cpu!(ldx, [0xa2, 5 /* LDX, 5 */], |cpu: CPU| {
         assert_eq!(cpu.register_x, 5);
         assert_eq!(cpu.status, CpuFlags::default());
     });
 
-    test_cpu!(test_read_write_word, |cpu: &mut CPU| {
+    test_cpu!(read_write_word, |cpu: &mut CPU| {
         cpu.write_word(0x10, 0x1234);
         assert_eq!(cpu.read_word(0x10), 0x1234);
         cpu.write_word(0xfff, 0x5422);
         assert_eq!(cpu.read_word(0xfff), 0x5422);
     });
 
-    test_cpu!(test_read_write_byte, |cpu: &mut CPU| {
+    test_cpu!(read_write_byte, |cpu: &mut CPU| {
         cpu.write_byte(0x10, 0x12);
         assert_eq!(cpu.read_byte(0x10), 0x12);
     });
 
-    test_cpu!(test_update_zero_and_negative, |cpu: &mut CPU| {
+    test_cpu!(update_zero_and_negative, |cpu: &mut CPU| {
         cpu.update_zero_and_negative_flags(0);
         assert!(cpu.status.contains(CpuFlags::ZERO));
         cpu.update_zero_and_negative_flags(1);
@@ -717,20 +500,20 @@ mod test {
         ($test_name: ident, $asm: expr, $flag: expr) => {
             test_cpu!($test_name, [$asm], true, |cpu: &mut CPU| {
                 cpu.status.insert($flag);
-                cpu.run();
+                run_cpu(cpu);
                 assert!(!cpu.status.contains($flag));
             });
         };
     }
 
-    test_status_clear!(test_clv, 0xb8, CpuFlags::OVERFLOW);
+    test_status_clear!(clv, 0xb8, CpuFlags::OVERFLOW);
 
-    test_status_set!(test_sec, 0x38, CpuFlags::CARRY);
-    test_status_clear!(test_clc, 0x18, CpuFlags::CARRY);
+    test_status_set!(sec, 0x38, CpuFlags::CARRY);
+    test_status_clear!(clc, 0x18, CpuFlags::CARRY);
 
-    test_status_clear!(test_cld, 0xd8, CpuFlags::DECIMAL);
-    test_status_set!(test_sed, 0xf8, CpuFlags::DECIMAL);
+    test_status_clear!(cld, 0xd8, CpuFlags::DECIMAL);
+    test_status_set!(sed, 0xf8, CpuFlags::DECIMAL);
 
-    test_status_set!(test_sei, 0x78, CpuFlags::IRQ);
-    test_status_clear!(test_cli, 0x58, CpuFlags::IRQ);
+    test_status_set!(sei, 0x78, CpuFlags::IRQ);
+    test_status_clear!(cli, 0x58, CpuFlags::IRQ);
 }

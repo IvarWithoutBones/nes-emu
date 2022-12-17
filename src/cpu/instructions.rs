@@ -1,5 +1,5 @@
 use crate::bus::{Clock, Memory};
-use crate::cpu::{AdressingMode, CpuFlags, CPU};
+use crate::cpu::{addressing_mode::AdressingMode, CpuFlags, CPU};
 
 pub type CycleCount = u64;
 
@@ -59,6 +59,8 @@ impl Instruction {
             &AdressingMode::Accumulator => {
                 args = "A".to_string();
             }
+
+            // TODO: formatting of indirect modes
 
             _ => {
                 if mode.has_arguments() {

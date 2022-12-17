@@ -33,7 +33,6 @@ bitflags! {
 }
 
 #[derive(Debug, Copy, Clone)]
-#[allow(dead_code)]
 pub struct Header {
     mirroring: Mirroring,
     program_rom_pages: usize,
@@ -113,7 +112,7 @@ impl Cartridge {
     const TRAINER_SIZE: usize = 512;
 
     pub fn from_bytes(data: &Vec<u8>) -> Result<Cartridge, String> {
-        let cart_span = tracing::span!(tracing::Level::INFO, Cartridge::SPAN_NAME).entered();
+        let _span = tracing::span!(tracing::Level::INFO, Cartridge::SPAN_NAME).entered();
         let header = Header::new(data[..HEADER_SIZE].try_into().unwrap())?;
         let program_rom_size = header.program_rom_pages * Self::PROGRAM_ROM_PAGE_SIZE;
         let character_rom_size = header.character_rom_pages * Self::CHARACTER_ROM_PAGE_SIZE;
@@ -130,15 +129,16 @@ impl Cartridge {
         tracing::debug!(header.has_trainer);
         tracing::info!(
             "{} program ROM page(s), {} bytes",
-            header.program_rom_pages, program_rom_size
+            header.program_rom_pages,
+            program_rom_size
         );
         tracing::info!(
             "{} character ROM page(s), {} bytes",
-            header.character_rom_pages, character_rom_size
+            header.character_rom_pages,
+            character_rom_size
         );
         tracing::info!("{} mirroring", header.mirroring);
         tracing::info!("mapper {}\n", header.mapper);
-        cart_span.exit();
 
         Ok(Cartridge {
             program_rom: data[program_rom_start..(program_rom_start + program_rom_size)].to_vec(),

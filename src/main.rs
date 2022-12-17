@@ -30,18 +30,13 @@ fn main() {
     let args = Args::parse();
 
     // Set up the logger
-    let log_level = args.log_level.unwrap_or_else(|| "info".to_string());
-    if tracing::subscriber::set_global_default(
-        tracing_subscriber::fmt()
-            .with_env_filter(log_level)
-            .with_target(false) // Dont display 'nes_emu' for every span
-            .without_time()
-            .finish(),
-    )
-    .is_err()
-    {
-        panic!("failed to set global tracing subscriber");
-    }
+    let log_level = args.log_level.unwrap_or_else(|| "debug".to_string());
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(log_level)
+        .with_target(false) // Dont display 'nes_emu' for every span
+        .without_time()
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set default subscriber");
 
     // Load data for cartridge
     let rom_data = std::fs::read(&args.rom).unwrap_or_else(|err| {
@@ -53,7 +48,7 @@ fn main() {
     let bus: Bus = Bus::new(&rom_data);
 
     // Spawn the CPU thread
-    let (instruction_sender, instruction_receiver) = channel();
+    let (cpu_state_sender, cpu_state_receiver) = channel();
     let cpu_handle = thread::spawn(move || {
         let mut cpu = CPU::new(bus);
         cpu.reset();
@@ -61,7 +56,7 @@ fn main() {
         loop {
             if let Some(instr_state) = cpu.step() {
                 let ptr = Box::new(instr_state);
-                if instruction_sender.send(ptr).is_err() {
+                if cpu_state_sender.send(ptr).is_err() {
                     // GUI has died, so the CPU should too.
                     break;
                 };
@@ -69,12 +64,11 @@ fn main() {
                 // Some sort of error occured, should communicate to the GUI in the future.
                 break;
             }
-            // thread::sleep(std::time::Duration::from_millis(1000));
         }
     });
 
     if !args.without_gui {
-        Gui::run("NES emu", instruction_receiver);
+        Gui::run("NES emu", cpu_state_receiver);
     }
 
     if cpu_handle.join().is_err() {
