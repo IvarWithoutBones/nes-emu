@@ -1,6 +1,6 @@
 use crate::cpu::{CpuFlags, CpuState};
 use eframe::egui;
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 
 type CpuStateBox = Box<CpuState>;
 
@@ -8,6 +8,8 @@ pub struct Gui {
     cpu_state_receiver: Receiver<CpuStateBox>,
     cpu_states: Vec<CpuStateBox>,
     selected_cpu_state_index: Option<usize>,
+    step_sender: Sender<bool>,
+    cpu_paused: bool,
 }
 
 impl Gui {
@@ -16,21 +18,27 @@ impl Gui {
     const MAX_CPU_STATES: usize = 300;
     const CPU_STATES_BUFFER: usize = 100;
 
-    pub fn new(receiver: Receiver<CpuStateBox>) -> Self {
+    pub fn new(cpu_state_receiver: Receiver<CpuStateBox>, step_sender: Sender<bool>) -> Self {
         Self {
-            cpu_state_receiver: receiver,
+            cpu_state_receiver,
             cpu_states: Vec::new(),
             selected_cpu_state_index: None,
+            step_sender,
+            cpu_paused: false,
         }
     }
 
-    pub fn run(window_title: &str, receiver: Receiver<CpuStateBox>) {
+    pub fn run(
+        window_title: &str,
+        cpu_state_receiver: Receiver<CpuStateBox>,
+        step_sender: Sender<bool>,
+    ) {
         let _span = tracing::span!(tracing::Level::INFO, Gui::SPAN_NAME).entered();
         let options = eframe::NativeOptions::default();
         eframe::run_native(
             window_title,
             options,
-            Box::new(|_cc| Box::new(Self::new(receiver))),
+            Box::new(|_cc| Box::new(Self::new(cpu_state_receiver, step_sender))),
         );
     }
 
@@ -44,6 +52,35 @@ impl Gui {
         if jump_to_bottom.clicked() {
             self.selected_cpu_state_index = None;
         }
+
+        ui.separator();
+
+        ui.horizontal_top(|ui| {
+            let step = ui
+                .button("Step")
+                .on_hover_text("Step the CPU one instruction");
+            if step.clicked() {
+                if self.cpu_paused {
+                    self.step_sender.send(true).unwrap_or_else(|_| {
+                        tracing::error!("Failed to send step signal to CPU thread");
+                    });
+                } else {
+                    self.cpu_paused = true;
+                }
+            }
+
+            let toggle = ui
+                .button("Toggle")
+                .on_hover_text("Toggle the CPU between being paused and running");
+            if toggle.clicked() {
+                if self.cpu_paused {
+                    self.cpu_paused = false;
+                } else {
+                    self.cpu_paused = true;
+                }
+            }
+        });
+
         ui.separator();
 
         egui::ScrollArea::vertical()
@@ -53,6 +90,7 @@ impl Gui {
                 for (index, state) in self.cpu_states.iter().enumerate() {
                     egui::Grid::new(index).show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            // TODO: sometimes one of these dont align?
                             let pc_label = ui
                                 .selectable_label(false, &format!("{:04X}", state.program_counter))
                                 .on_hover_text("Program counter");
@@ -113,13 +151,13 @@ impl Gui {
         });
     }
 
-    fn selected_or_last_cpu_state(&self) -> &CpuState {
+    fn selected_or_last_cpu_state(&self) -> Option<&CpuStateBox> {
         let selected_index = if self.selected_cpu_state_index.is_some() {
             self.selected_cpu_state_index.unwrap()
         } else {
-            self.cpu_states.len() - 1
+            self.cpu_states.len().saturating_sub(1)
         };
-        self.cpu_states.get(selected_index).unwrap()
+        self.cpu_states.get(selected_index)
     }
 
     fn update_cpu_state_cache(&mut self) {
@@ -136,6 +174,12 @@ impl Gui {
 
 impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.cpu_paused {
+            self.step_sender.send(true).unwrap_or_else(|_| {
+                tracing::error!("Failed to send step signal to CPU thread");
+            });
+        }
+
         self.update_cpu_state_cache();
 
         egui::SidePanel::left("disassembly")
@@ -144,14 +188,14 @@ impl eframe::App for Gui {
             .show(ctx, |ui| self.disassembly_ui(ui));
 
         egui::CentralPanel::default().show(ctx, |_ui| {
-            let state = self.selected_or_last_cpu_state();
+            if let Some(state) = self.selected_or_last_cpu_state() {
+                egui::SidePanel::left("flags")
+                    // Make sure the margins are consistent
+                    .frame(egui::Frame::central_panel(&egui::Style::default()))
+                    .show(ctx, |ui| self.flags_ui(ui, state));
 
-            egui::SidePanel::left("flags")
-                // Make sure the margins are consistent
-                .frame(egui::Frame::central_panel(&egui::Style::default()))
-                .show(ctx, |ui| self.flags_ui(ui, state));
-
-            egui::CentralPanel::default().show(ctx, |ui| self.registers_ui(ui, state));
+                egui::CentralPanel::default().show(ctx, |ui| self.registers_ui(ui, state));
+            }
         });
 
         // Calling this here will request another frame immediately after this one

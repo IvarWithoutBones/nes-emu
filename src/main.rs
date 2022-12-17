@@ -47,13 +47,29 @@ fn main() {
     // Instantiate the bus
     let bus: Bus = Bus::new(&rom_data);
 
-    // Spawn the CPU thread
+    // CPU state communication
     let (cpu_state_sender, cpu_state_receiver) = channel();
+    let (step_sender, step_receiver) = channel();
+    let step_receiver = if args.without_gui {
+        None
+    } else {
+        Some(step_receiver)
+    };
+
+    // Actually spawn the CPU thread
     let cpu_handle = thread::spawn(move || {
         let mut cpu = CPU::new(bus);
         cpu.reset();
 
         loop {
+            if step_receiver.is_some() {
+                // TODO: This is horribly ineffecient.
+                if step_receiver.as_ref().unwrap().try_recv().is_err() {
+                    thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                }
+            }
+
             if let Some(instr_state) = cpu.step() {
                 let ptr = Box::new(instr_state);
                 if cpu_state_sender.send(ptr).is_err() {
@@ -68,7 +84,7 @@ fn main() {
     });
 
     if !args.without_gui {
-        Gui::run("NES emu", cpu_state_receiver);
+        Gui::run("NES emu", cpu_state_receiver, step_sender);
     }
 
     if cpu_handle.join().is_err() {
