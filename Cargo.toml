@@ -3,9 +3,13 @@ name = "nes-emu"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+# Bit flag manipulation
 bitflags = "2.0.0-rc.1"
+# Command line arguments
 clap = { version = "4.0.29", features = ["derive"] }
+# Gui
 eframe = "0.20.1"
+# Logging
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+tracing = "0.1.37"

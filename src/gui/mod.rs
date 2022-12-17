@@ -11,6 +11,8 @@ pub struct Gui {
 }
 
 impl Gui {
+    const SPAN_NAME: &'static str = "gui";
+
     pub fn new(receiver: Receiver<InstructionBox>) -> Self {
         Self {
             instruction_receiver: receiver,
@@ -20,6 +22,7 @@ impl Gui {
     }
 
     pub fn run(window_title: &str, receiver: Receiver<InstructionBox>) {
+        let _span = tracing::span!(tracing::Level::INFO, Gui::SPAN_NAME).entered();
         let options = eframe::NativeOptions::default();
         eframe::run_native(
             window_title,
@@ -117,7 +120,7 @@ impl Gui {
     }
 
     fn update_instruction_cache(&mut self) {
-        if let Ok(state) = self.instruction_receiver.try_recv() {
+        while let Ok(state) = self.instruction_receiver.try_recv() {
             // TODO: truncate the cache if it gets too big.
             self.instructions.push(state);
         };

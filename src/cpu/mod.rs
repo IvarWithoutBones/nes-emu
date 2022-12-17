@@ -176,6 +176,8 @@ pub struct CPU {
 }
 
 impl CPU {
+    const SPAN_NAME: &'static str = "cpu";
+
     #[allow(dead_code)] // TODO: remove when graphics are implemented
     const RESET_VECTOR: u16 = 0xFFFC;
 
@@ -196,6 +198,7 @@ impl CPU {
     }
 
     pub fn reset(&mut self) {
+        let _span = tracing::span!(tracing::Level::INFO, CPU::SPAN_NAME).entered();
         self.set_cycles(CPU::RESET_CYCLES);
         self.status = CpuFlags::default();
         self.stack_pointer = CPU::STACK_RESET;
@@ -206,16 +209,20 @@ impl CPU {
         // This is a hack to skip graphic init in nestest
         self.program_counter = 0xC000;
         // self.program_counter = self.read_word(CPU::RESET_VECTOR);
+        tracing::info!("reset to PC ${:04X}", self.program_counter);
     }
 
     pub fn push_byte(&mut self, data: u8) {
         self.write_byte(CPU::STACK_OFFSET + self.stack_pointer as u16, data);
         self.stack_pointer = self.stack_pointer.wrapping_sub(1);
+        tracing::trace!("pushed ${:02X} to the stack", data);
     }
 
     pub fn pop_byte(&mut self) -> u8 {
         self.stack_pointer = self.stack_pointer.wrapping_add(1);
-        self.read_byte(CPU::STACK_OFFSET + self.stack_pointer as u16)
+        let data = self.read_byte(CPU::STACK_OFFSET + self.stack_pointer as u16);
+        tracing::trace!("popped ${:02X} off the stack", data);
+        data
     }
 
     pub fn push_word(&mut self, data: u16) {
@@ -235,6 +242,7 @@ impl CPU {
     }
 
     pub fn step(&mut self) -> Option<InstructionState> {
+        let _span = tracing::span!(tracing::Level::INFO, CPU::SPAN_NAME).entered();
         let opcode = self.read_byte(self.program_counter);
         let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
             format!(
@@ -253,6 +261,7 @@ impl CPU {
             stack_pointer: self.stack_pointer,
             status: self.status.clone(),
         };
+        tracing::debug!("{}", state);
 
         if instr.name == "BRK" {
             // TODO: this is a hack
@@ -283,20 +292,18 @@ impl CPU {
             );
 
             // TODO: do this from a callback to make it more flexible
-            if !self.bus.quiet {
-                let mut bytes = String::new();
-                for i in 0..mode.len() {
-                    bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
-                }
-
-                println!(
-                    "{:04X}  {1: <9} {2:}  {3:}",
-                    self.program_counter,
-                    bytes,
-                    self,
-                    instr.format(self, mode)
-                );
+            let mut bytes = String::new();
+            for i in 0..mode.len() {
+                bytes += &format!("{:02X} ", self.read_byte(self.program_counter + i as u16));
             }
+
+            println!(
+                "{:04X}  {1: <9} {2:}  {3:}",
+                self.program_counter,
+                bytes,
+                self,
+                instr.format(self, mode)
+            );
 
             if instr.name == "BRK" {
                 // TODO: properly implement
@@ -390,6 +397,22 @@ impl fmt::Display for CPU {
     }
 }
 
+impl fmt::Display for InstructionState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} {}  {}",
+            self.accumulator,
+            self.register_x,
+            self.register_y,
+            self.status,
+            self.stack_pointer,
+            self.status,
+            self.formatted
+        )
+    }
+}
+
 impl fmt::Display for AdressingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -413,7 +436,6 @@ impl fmt::Display for AdressingMode {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::Cartridge;
 
     #[test]
     fn test_nth_bit() {
@@ -432,8 +454,7 @@ mod test {
         ($test_name: ident, $asm:expr, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, false));
+                let mut cpu = CPU::new(Bus::new_dummy($asm.to_vec()));
                 cpu.run();
                 $callback(cpu);
             }
@@ -442,8 +463,7 @@ mod test {
         ($test_name: ident, $asm:expr, $dont_execute:expr, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let cart = Cartridge::new($asm.to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, false));
+                let mut cpu = CPU::new(Bus::new_dummy($asm.to_vec()));
                 $callback(&mut cpu);
             }
         };
@@ -451,8 +471,7 @@ mod test {
         ($test_name: ident, $callback:expr) => {
             #[test]
             fn $test_name() {
-                let cart = Cartridge::new([0].to_vec()).unwrap();
-                let mut cpu = CPU::new(Bus::new(cart, false));
+                let mut cpu = CPU::new(Bus::new_dummy([].to_vec()));
                 $callback(&mut cpu);
             }
         };
