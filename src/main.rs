@@ -79,8 +79,7 @@ fn main() {
             }
 
             if let Some(instr_state) = cpu.step() {
-                let ptr = Box::new(instr_state);
-                if cpu_state_sender.send(ptr).is_err() {
+                if cpu_state_sender.send(instr_state).is_err() {
                     // GUI has died, so the CPU should too.
                     break;
                 };

@@ -10,11 +10,16 @@ use std::{
     sync::mpsc::{Receiver, Sender},
 };
 
-type CpuStateBox = Box<CpuState>;
+fn header_label(ui: &mut egui::Ui, name: &str) {
+    ui.vertical_centered(|ui| {
+        ui.heading(egui::RichText::new(name).strong());
+    });
+    ui.separator();
+}
 
 pub struct Gui {
-    cpu_state_receiver: Receiver<CpuStateBox>,
-    cpu_states: Vec<CpuStateBox>,
+    cpu_state_receiver: Receiver<Box<CpuState>>,
+    cpu_states: Vec<Box<CpuState>>,
     selected_cpu_state_index: Option<usize>,
 
     step_sender: Sender<StepState>,
@@ -28,7 +33,10 @@ impl Gui {
     const MAX_CPU_STATES: usize = 300;
     const CPU_STATES_BUFFER: usize = 100;
 
-    pub fn new(cpu_state_receiver: Receiver<CpuStateBox>, step_sender: Sender<StepState>) -> Self {
+    pub fn new(
+        cpu_state_receiver: Receiver<Box<CpuState>>,
+        step_sender: Sender<StepState>,
+    ) -> Self {
         let mut mem_viewer_options =
             egui_memory_editor::option_data::MemoryEditorOptions::default();
         mem_viewer_options.show_ascii = false;
@@ -52,7 +60,7 @@ impl Gui {
 
     pub fn run(
         window_title: &str,
-        cpu_state_receiver: Receiver<CpuStateBox>,
+        cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
     ) {
         let _span = tracing::span!(tracing::Level::INFO, Gui::SPAN_NAME).entered();
@@ -65,8 +73,7 @@ impl Gui {
     }
 
     fn disassembly_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading(egui::RichText::new("Disassembly").strong());
-        ui.separator();
+        header_label(ui, "Disassembly");
 
         let jump_to_bottom = ui
             .button("Scroll to bottom")
@@ -111,19 +118,16 @@ impl Gui {
             .show(ui, |ui| {
                 for (index, state) in self.cpu_states.iter().enumerate() {
                     egui::Grid::new(index).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            // TODO: sometimes one of these dont align?
-                            let pc_label = ui
-                                .label(&format!("{:04X}", state.program_counter))
-                                .on_hover_text("Program counter");
-                            let instr_label = ui
-                                .selectable_label(false, state.formatted.clone())
-                                .on_hover_text(format!("Flags: {}", state.status));
+                        let pc_label = ui
+                            .label(&format!("{:04X}", state.program_counter))
+                            .on_hover_text("Program counter");
+                        let instr_label = ui
+                            .selectable_label(false, state.instruction.clone())
+                            .on_hover_text(format!("Flags: {}", state.status));
 
-                            if instr_label.clicked() || pc_label.clicked() {
-                                self.selected_cpu_state_index = Some(index);
-                            }
-                        });
+                        if instr_label.clicked() || pc_label.clicked() {
+                            self.selected_cpu_state_index = Some(index);
+                        }
                     });
                 }
 
@@ -174,17 +178,33 @@ impl Gui {
     }
 
     fn cpu_status_ui(&self, ui: &mut egui::Ui, state: &CpuState) {
-        ui.with_layout(egui::Layout::top_down_justified(egui::Align::TOP), |ui| {
-            ui.heading(egui::RichText::new("CPU State").strong());
-            ui.separator();
+        // TODO: This thinks it has infinite space to the right, so centering it with `header_label` doesn't work.
+        // Can be fixed by calling `egui::CentralPanel` as the last panel, but that breaks numerous other things.
+        ui.heading(egui::RichText::new("CPU Status").strong());
 
-            self.registers_ui(ui, state);
-            ui.separator();
-            self.flags_ui(ui, state);
+        ui.separator();
+        self.registers_ui(ui, state);
+        ui.separator();
+        self.flags_ui(ui, state);
+    }
+
+    fn memory_viewer_ui(
+        ui: &mut egui::Ui,
+        state: &CpuState,
+        viewer: &mut egui_memory_editor::MemoryEditor,
+    ) {
+        header_label(ui, "Memory Viewer");
+        let mut mem = state.memory.clone();
+        viewer.draw_editor_contents_read_only(ui, &mut mem, |mem, addr| {
+            if addr >= mem.len() {
+                tracing::warn!("memory viewer address out of bounds: {}", addr);
+                return None;
+            }
+            Some(mem[addr])
         });
     }
 
-    fn selected_or_last_cpu_state(&self) -> Option<&CpuStateBox> {
+    fn selected_or_last_cpu_state(&self) -> Option<&Box<CpuState>> {
         let selected_index = if self.selected_cpu_state_index.is_some() {
             self.selected_cpu_state_index.unwrap()
         } else {
@@ -203,24 +223,6 @@ impl Gui {
             }
         }
     }
-
-    fn memory_viewer_ui(
-        ui: &mut egui::Ui,
-        state: &CpuState,
-        viewer: &mut egui_memory_editor::MemoryEditor,
-    ) {
-        ui.heading(egui::RichText::new("Memory viewer").strong());
-        ui.separator();
-
-        let mut mem = state.memory.clone();
-        viewer.draw_editor_contents_read_only(ui, &mut mem, |mem, addr| {
-            if addr >= mem.len() {
-                tracing::warn!("memory viewer address out of bounds: {}", addr);
-                return None;
-            }
-            Some(mem[addr])
-        });
-    }
 }
 
 impl eframe::App for Gui {
@@ -235,13 +237,14 @@ impl eframe::App for Gui {
         if let Some(state) = self.selected_or_last_cpu_state() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.cpu_status_ui(ui, state);
+                ui.separator();
             });
 
             egui::SidePanel::right("memory_viewer")
                 // Make sure the margins are consistent
                 .frame(egui::Frame::central_panel(&egui::Style::default()))
                 .show(ctx, |ui| {
-                    Gui::memory_viewer_ui(ui, state, &mut self.memory_viewer.borrow_mut());
+                    Self::memory_viewer_ui(ui, state, &mut self.memory_viewer.borrow_mut());
                 });
         }
 

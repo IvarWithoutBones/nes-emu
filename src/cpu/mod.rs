@@ -9,7 +9,7 @@ use std::fmt;
 
 /// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
 pub struct CpuState {
-    pub formatted: String,
+    pub instruction: String,
     pub accumulator: u8,
     pub register_x: u8,
     pub register_y: u8,
@@ -127,7 +127,7 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value == 0);
     }
 
-    pub fn step(&mut self) -> Option<CpuState> {
+    pub fn step(&mut self) -> Option<Box<CpuState>> {
         let _span = tracing::span!(tracing::Level::INFO, CPU::SPAN_NAME).entered();
         let opcode = self.read_byte(self.program_counter);
         let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
@@ -139,7 +139,7 @@ impl CPU {
         );
 
         let state = CpuState {
-            formatted: instr.format(self, mode),
+            instruction: instr.format(self, mode),
             accumulator: self.accumulator,
             register_x: self.register_x,
             register_y: self.register_y,
@@ -161,10 +161,10 @@ impl CPU {
             self.program_counter += mode.len();
         }
 
-        tracing::debug!("{}  {}", self, state.formatted);
+        tracing::debug!("{}  {}", self, state.instruction);
 
         self.tick(*cycles as u64);
-        Some(state)
+        Some(Box::new(state))
     }
 }
 
@@ -243,7 +243,7 @@ mod test {
             if let Some(state) = cpu.step() {
                 // Unfortunately tracing doesn't seem to want to cooperate with tests.
                 // It'll print the logs even for passing tests, which clutters the output.
-                println!("{}  {}", cpu, state.formatted);
+                println!("{}  {}", cpu, state.instruction);
             } else {
                 break;
             }
