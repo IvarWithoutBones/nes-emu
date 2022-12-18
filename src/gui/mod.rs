@@ -1,4 +1,7 @@
+pub mod step_state;
+
 use crate::cpu::{CpuFlags, CpuState};
+use crate::gui::step_state::StepState;
 use eframe::egui;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -8,8 +11,8 @@ pub struct Gui {
     cpu_state_receiver: Receiver<CpuStateBox>,
     cpu_states: Vec<CpuStateBox>,
     selected_cpu_state_index: Option<usize>,
-    step_sender: Sender<bool>,
-    cpu_paused: bool,
+    step_sender: Sender<StepState>,
+    step_state: StepState,
 }
 
 impl Gui {
@@ -18,20 +21,20 @@ impl Gui {
     const MAX_CPU_STATES: usize = 300;
     const CPU_STATES_BUFFER: usize = 100;
 
-    pub fn new(cpu_state_receiver: Receiver<CpuStateBox>, step_sender: Sender<bool>) -> Self {
+    pub fn new(cpu_state_receiver: Receiver<CpuStateBox>, step_sender: Sender<StepState>) -> Self {
         Self {
             cpu_state_receiver,
             cpu_states: Vec::new(),
             selected_cpu_state_index: None,
             step_sender,
-            cpu_paused: false,
+            step_state: StepState::default(),
         }
     }
 
     pub fn run(
         window_title: &str,
         cpu_state_receiver: Receiver<CpuStateBox>,
-        step_sender: Sender<bool>,
+        step_sender: Sender<StepState>,
     ) {
         let _span = tracing::span!(tracing::Level::INFO, Gui::SPAN_NAME).entered();
         let options = eframe::NativeOptions::default();
@@ -60,24 +63,24 @@ impl Gui {
                 .button("Step")
                 .on_hover_text("Step the CPU one instruction");
             if step.clicked() {
-                if self.cpu_paused {
-                    self.step_sender.send(true).unwrap_or_else(|_| {
-                        tracing::error!("Failed to send step signal to CPU thread");
+                self.step_state.step();
+                self.step_sender
+                    .send(self.step_state.clone())
+                    .unwrap_or_else(|err| {
+                        tracing::error!("failed to send step state: {}", err);
                     });
-                } else {
-                    self.cpu_paused = true;
-                }
             }
 
             let toggle = ui
                 .button("Toggle")
                 .on_hover_text("Toggle the CPU between being paused and running");
             if toggle.clicked() {
-                if self.cpu_paused {
-                    self.cpu_paused = false;
-                } else {
-                    self.cpu_paused = true;
-                }
+                self.step_state.toggle_pause();
+                self.step_sender
+                    .send(self.step_state.clone())
+                    .unwrap_or_else(|err| {
+                        tracing::error!("failed to send step state: {}", err);
+                    });
             }
         });
 
@@ -174,12 +177,6 @@ impl Gui {
 
 impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if !self.cpu_paused {
-            self.step_sender.send(true).unwrap_or_else(|_| {
-                tracing::error!("Failed to send step signal to CPU thread");
-            });
-        }
-
         self.update_cpu_state_cache();
 
         egui::SidePanel::left("disassembly")

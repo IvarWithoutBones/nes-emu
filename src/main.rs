@@ -6,7 +6,7 @@ mod gui;
 use bus::Bus;
 use clap::Parser;
 use cpu::CPU;
-use gui::Gui;
+use gui::{step_state::StepState, Gui};
 use std::{sync::mpsc::channel, thread};
 use tracing;
 use tracing_subscriber;
@@ -58,15 +58,23 @@ fn main() {
 
     // Actually spawn the CPU thread
     let cpu_handle = thread::spawn(move || {
+        let mut step_state = StepState::default();
         let mut cpu = CPU::new(bus);
         cpu.reset();
 
         loop {
-            if step_receiver.is_some() {
-                // TODO: This is horribly ineffecient.
-                if step_receiver.as_ref().unwrap().try_recv().is_err() {
-                    thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
+            if let Some(step_receiver) = step_receiver.as_ref() {
+                if let Ok(new_step_state) = step_receiver.try_recv() {
+                    step_state = new_step_state;
+                }
+
+                if step_state.paused {
+                    if step_state.step {
+                        step_state.step = false;
+                    } else {
+                        thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
                 }
             }
 
