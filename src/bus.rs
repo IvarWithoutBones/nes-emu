@@ -3,7 +3,7 @@ use crate::cartridge::Cartridge;
 pub const PROGRAM_ROM_START: u16 = 0x8000;
 const PROGRAM_ROM_END: u16 = 0xFFFF;
 
-const CPU_RAM_SIZE: usize = 2048;
+pub const CPU_RAM_SIZE: usize = 2048;
 const CPU_RAM_START: u16 = 0x0000;
 const CPU_RAM_MIRROR_END: u16 = 0x1FFF;
 

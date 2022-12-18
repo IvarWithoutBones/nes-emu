@@ -2,7 +2,7 @@ mod addressing_mode;
 mod assembler;
 mod instructions;
 
-use crate::bus::{Bus, Clock, Memory, PROGRAM_ROM_START};
+use crate::bus::{Bus, Clock, Memory, CPU_RAM_SIZE, PROGRAM_ROM_START};
 use bitflags::bitflags;
 use instructions::Instruction;
 use std::fmt;
@@ -16,6 +16,7 @@ pub struct CpuState {
     pub program_counter: u16,
     pub stack_pointer: u8,
     pub status: CpuFlags,
+    pub memory: [u8; CPU_RAM_SIZE],
 }
 
 bitflags! {
@@ -54,13 +55,11 @@ pub struct CPU {
 
 impl CPU {
     const SPAN_NAME: &'static str = "cpu";
-
-    #[allow(dead_code)] // TODO: remove when graphics are implemented
-    const RESET_VECTOR: u16 = 0xFFFC;
-
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
     const RESET_CYCLES: u64 = 7;
+    #[allow(dead_code)]
+    const RESET_VECTOR: u16 = 0xFFFC;
 
     pub fn new(bus: Bus) -> CPU {
         CPU {
@@ -147,6 +146,7 @@ impl CPU {
             program_counter: self.program_counter,
             stack_pointer: self.stack_pointer,
             status: self.status.clone(),
+            memory: self.bus.cpu_ram,
         };
 
         if instr.name == "BRK" {

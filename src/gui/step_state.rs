@@ -9,7 +9,7 @@ impl Default for StepState {
     fn default() -> Self {
         Self {
             paused: true,
-            step: false,
+            step: true,
         }
     }
 }
