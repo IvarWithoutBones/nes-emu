@@ -25,11 +25,13 @@ pub struct Gui {
     step_state: StepState,
 
     memory_viewer: RefCell<egui_memory_editor::MemoryEditor>,
+    jump_to_bottom_clicked: bool,
+    highlight_text_colour: egui::Color32,
 }
 
 impl Gui {
     const SPAN_NAME: &'static str = "gui";
-    const MAX_CPU_STATES: usize = 300;
+    const MAX_CPU_STATES: usize = 500;
     const CPU_STATES_BUFFER: usize = 100;
 
     pub fn new(
@@ -39,8 +41,9 @@ impl Gui {
         let mut mem_viewer_options =
             egui_memory_editor::option_data::MemoryEditorOptions::default();
         mem_viewer_options.show_ascii = false;
-        mem_viewer_options.column_count = 32;
         mem_viewer_options.is_options_collapsed = true;
+        mem_viewer_options.column_count = 32;
+        let highlight_text_colour = mem_viewer_options.highlight_text_colour;
         let memory_viewer = MemoryEditor::new()
             .with_options(mem_viewer_options)
             .with_address_range("CPU RAM", 0..CPU_RAM_SIZE);
@@ -54,6 +57,8 @@ impl Gui {
             step_state: StepState::default(),
 
             memory_viewer: RefCell::new(memory_viewer),
+            jump_to_bottom_clicked: false,
+            highlight_text_colour,
         }
     }
 
@@ -71,24 +76,28 @@ impl Gui {
         );
     }
 
-    fn disassembly_ui(&mut self, ui: &mut egui::Ui) {
-        header_label(ui, "Disassembly");
-        ui.separator();
+    fn instructions_ui(&mut self, ui: &mut egui::Ui) {
+        ui.spacing_mut().item_spacing = egui::Vec2::new(7.5, 7.5);
+        header_label(ui, "Instructions");
 
-        let jump_to_bottom = ui
-            .button("Scroll to bottom")
-            .on_hover_text("Jump to the latest instruction");
-        if jump_to_bottom.clicked() {
-            self.selected_cpu_state_index = None;
-        }
-
-        ui.separator();
+        ui.vertical_centered_justified(|ui| {
+            let jump_to_bottom = ui
+                .button("Jump to bottom")
+                .on_hover_text("Jump to the latest instruction");
+            if jump_to_bottom.clicked() {
+                self.jump_to_bottom_clicked = true;
+                self.selected_cpu_state_index = None;
+            } else {
+                self.jump_to_bottom_clicked = false;
+            }
+        });
 
         ui.horizontal_top(|ui| {
             let step = ui
                 .button("Step")
                 .on_hover_text("Step the CPU one instruction");
             if step.clicked() {
+                self.selected_cpu_state_index = None;
                 self.step_state.step();
                 self.step_sender
                     .send(self.step_state.clone())
@@ -101,6 +110,7 @@ impl Gui {
                 .button("Toggle")
                 .on_hover_text("Toggle the CPU between being paused and running");
             if toggle.clicked() {
+                self.selected_cpu_state_index = None;
                 self.step_state.toggle_pause();
                 self.step_sender
                     .send(self.step_state.clone())
@@ -118,9 +128,19 @@ impl Gui {
             .show(ui, |ui| {
                 for (index, state) in self.cpu_states.iter().enumerate() {
                     egui::Grid::new(index).show(ui, |ui| {
-                        let pc_label = ui
-                            .label(&format!("{:04X}", state.program_counter))
-                            .on_hover_text("Program counter");
+                        // Highlight the selected instruction
+                        let pc_text = if self.selected_cpu_state_index == Some(index)
+                            || (self.selected_cpu_state_index == None
+                                && index == self.cpu_states.len() - 1)
+                        {
+                            egui::RichText::new(format!("{:04X}", state.program_counter))
+                                .color(self.highlight_text_colour)
+                                .strong()
+                        } else {
+                            egui::RichText::new(format!("{:04X}", state.program_counter))
+                        };
+                        let pc_label = ui.label(pc_text).on_hover_text("Program counter");
+
                         let instr_label = ui
                             .selectable_label(false, state.instruction.clone())
                             .on_hover_text(format!("Flags: {}", state.status));
@@ -131,7 +151,7 @@ impl Gui {
                     });
                 }
 
-                if jump_to_bottom.clicked() {
+                if self.jump_to_bottom_clicked {
                     ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                 }
             });
@@ -251,7 +271,7 @@ impl eframe::App for Gui {
         egui::SidePanel::left("disassembly")
             .frame(default_frame())
             .resizable(false)
-            .show(ctx, |ui| self.disassembly_ui(ui));
+            .show(ctx, |ui| self.instructions_ui(ui));
 
         if let Some(state) = self.selected_or_last_cpu_state() {
             egui::CentralPanel::default().show(ctx, |ui| {
