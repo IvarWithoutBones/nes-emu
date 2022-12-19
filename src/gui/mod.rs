@@ -14,7 +14,6 @@ fn header_label(ui: &mut egui::Ui, name: &str) {
     ui.vertical_centered(|ui| {
         ui.heading(egui::RichText::new(name).strong());
     });
-    ui.separator();
 }
 
 pub struct Gui {
@@ -40,7 +39,7 @@ impl Gui {
         let mut mem_viewer_options =
             egui_memory_editor::option_data::MemoryEditorOptions::default();
         mem_viewer_options.show_ascii = false;
-        mem_viewer_options.is_resizable_column = false;
+        mem_viewer_options.column_count = 32;
         mem_viewer_options.is_options_collapsed = true;
         let memory_viewer = MemoryEditor::new()
             .with_options(mem_viewer_options)
@@ -74,6 +73,7 @@ impl Gui {
 
     fn disassembly_ui(&mut self, ui: &mut egui::Ui) {
         header_label(ui, "Disassembly");
+        ui.separator();
 
         let jump_to_bottom = ui
             .button("Scroll to bottom")
@@ -138,54 +138,73 @@ impl Gui {
     }
 
     fn registers_ui(&self, ui: &mut egui::Ui, state: &CpuState) {
-        ui.label(egui::RichText::new("Registers").strong());
-        egui::Grid::new("registers").striped(true).show(ui, |ui| {
-            let label = |ui: &mut egui::Ui, text: &str, num: u8| {
-                ui.label(text);
-                ui.label(format!("${:02X}", num));
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new("Registers").strong());
+            egui::Grid::new("registers").striped(true).show(ui, |ui| {
+                let label = |ui: &mut egui::Ui, text: &str, num: u8| {
+                    ui.label(text);
+                    ui.label(format!("${:02X}", num));
+                    ui.end_row();
+                };
+
+                ui.label("Program counter");
+                ui.label(format!("${:04X}", state.program_counter));
                 ui.end_row();
-            };
 
-            ui.label("Program counter");
-            ui.label(format!("${:04X}", state.program_counter));
-            ui.end_row();
-
-            label(ui, "Stack pointer", state.stack_pointer);
-            label(ui, "Accumulator", state.accumulator);
-            label(ui, "X register", state.register_x);
-            label(ui, "Y register", state.register_y);
+                label(ui, "Stack pointer", state.stack_pointer);
+                label(ui, "A register", state.accumulator);
+                label(ui, "X register", state.register_x);
+                label(ui, "Y register", state.register_y);
+            });
         });
     }
 
     fn flags_ui(&self, ui: &mut egui::Ui, state: &CpuState) {
-        ui.label(egui::RichText::new("Flags").strong());
-        egui::Grid::new("flags").striped(true).show(ui, |ui| {
-            let mut label = |text: &str, enabled: bool| {
-                ui.label(text);
-                ui.label(if enabled { "true" } else { "false" });
-                ui.end_row();
-            };
+        let label = |ui: &mut egui::Ui, text: &str, enabled: bool| {
+            ui.label(text);
+            ui.label(if enabled { "true" } else { "false" });
+            ui.end_row();
+        };
 
-            label("Negative", state.status.contains(CpuFlags::NEGATIVE));
-            label("Overflow", state.status.contains(CpuFlags::OVERFLOW));
-            label("Break", state.status.contains(CpuFlags::BREAK));
-            label("Break2", state.status.contains(CpuFlags::BREAK2));
-            label("Decimal", state.status.contains(CpuFlags::DECIMAL));
-            label("Interrupts disabled", state.status.contains(CpuFlags::IRQ));
-            label("Zero", state.status.contains(CpuFlags::ZERO));
-            label("Carry", state.status.contains(CpuFlags::CARRY));
+        ui.horizontal_top(|ui| {
+            egui::Grid::new("flags_grid_one")
+                .striped(true)
+                .show(ui, |ui| {
+                    let header_text = format!("Flags (${:02X})", state.status);
+                    ui.label(egui::RichText::new(header_text).strong());
+                    ui.end_row();
+
+                    label(ui, "Negative", state.status.contains(CpuFlags::NEGATIVE));
+                    label(ui, "Overflow", state.status.contains(CpuFlags::OVERFLOW));
+                    label(
+                        ui,
+                        "Interrupts disabled",
+                        state.status.contains(CpuFlags::IRQ),
+                    );
+                    label(ui, "Zero", state.status.contains(CpuFlags::ZERO));
+                    label(ui, "Carry", state.status.contains(CpuFlags::CARRY));
+                });
+            egui::Grid::new("flags_grid_two")
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.end_row(); // Spacing because the previous grid contains the header label
+
+                    label(ui, "Decimal", state.status.contains(CpuFlags::DECIMAL));
+                    label(ui, "Break", state.status.contains(CpuFlags::BREAK));
+                    label(ui, "Break2", state.status.contains(CpuFlags::BREAK2));
+                });
         });
     }
 
     fn cpu_status_ui(&self, ui: &mut egui::Ui, state: &CpuState) {
-        // TODO: This thinks it has infinite space to the right, so centering it with `header_label` doesn't work.
-        // Can be fixed by calling `egui::CentralPanel` as the last panel, but that breaks numerous other things.
-        ui.heading(egui::RichText::new("CPU Status").strong());
+        header_label(ui, "CPU Status");
 
-        ui.separator();
-        self.registers_ui(ui, state);
-        ui.separator();
-        self.flags_ui(ui, state);
+        // TODO: might be useful to display stack contents here as well
+        ui.horizontal_top(|ui| {
+            self.registers_ui(ui, state);
+            ui.separator();
+            self.flags_ui(ui, state);
+        });
     }
 
     fn memory_viewer_ui(
@@ -214,11 +233,11 @@ impl Gui {
     }
 
     fn update_cpu_state_cache(&mut self) {
+        // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {
-            // trim the cache if it gets too big, so we don't run out of memory
-            if self.cpu_states.len() < (Self::MAX_CPU_STATES + Self::CPU_STATES_BUFFER) {
-                self.cpu_states.push(state);
-            } else {
+            self.cpu_states.push(state);
+            // Trim the cache if it gets too big, so we don't run out of memory.
+            if self.cpu_states.len() > (Self::MAX_CPU_STATES + Self::CPU_STATES_BUFFER) {
                 self.cpu_states.drain(0..Self::CPU_STATES_BUFFER);
             }
         }
@@ -230,25 +249,27 @@ impl eframe::App for Gui {
         self.update_cpu_state_cache();
 
         egui::SidePanel::left("disassembly")
-            // Make sure the margins are consistent
-            .frame(egui::Frame::central_panel(&egui::Style::default()))
+            .frame(default_frame())
+            .resizable(false)
             .show(ctx, |ui| self.disassembly_ui(ui));
 
         if let Some(state) = self.selected_or_last_cpu_state() {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.cpu_status_ui(ui, state);
-                ui.separator();
-            });
-
-            egui::SidePanel::right("memory_viewer")
-                // Make sure the margins are consistent
-                .frame(egui::Frame::central_panel(&egui::Style::default()))
-                .show(ctx, |ui| {
+                egui::TopBottomPanel::top("cpu_status")
+                    .frame(default_frame())
+                    .show_inside(ui, |ui| self.cpu_status_ui(ui, state));
+                egui::CentralPanel::default().show_inside(ui, |ui| {
                     Self::memory_viewer_ui(ui, state, &mut self.memory_viewer.borrow_mut());
                 });
+            });
         }
 
         // Calling this here will request another frame immediately after this one
         ctx.request_repaint();
     }
+}
+
+// To make sure margins are consistent across panels
+fn default_frame() -> egui::Frame {
+    egui::Frame::central_panel(&egui::Style::default())
 }
