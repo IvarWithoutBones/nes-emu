@@ -1,4 +1,5 @@
 use crate::cartridge::Cartridge;
+use crate::ppu::Ppu;
 
 pub const PROGRAM_ROM_START: u16 = 0x8000;
 const PROGRAM_ROM_END: u16 = 0xFFFF;
@@ -47,6 +48,7 @@ pub struct Bus {
     pub cartridge: Cartridge,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
     pub cycles: u64,
+    pub ppu: Ppu,
 }
 
 impl Bus {
@@ -56,7 +58,8 @@ impl Bus {
         let _span = tracing::span!(tracing::Level::INFO, Bus::SPAN_NAME).entered();
         tracing::info!("succesfully initialized");
         Bus {
-            cartridge: cart,
+            cartridge: cart.clone(),
+            ppu: Ppu::new(cart.character_rom, cart.header.mirroring),
             cpu_ram: [0; CPU_RAM_SIZE],
             cycles: 0,
         }
@@ -118,13 +121,23 @@ impl Memory for Bus {
             CPU_RAM_START..=CPU_RAM_MIRROR_END => self.read_cpu_ram(address),
             PROGRAM_ROM_START..=PROGRAM_ROM_END => self.read_program_rom(address),
 
+            // TODO: do we have to consider mirroring?
             PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
-                tracing::warn!("unimplemented PPU register read at ${:04X}", address);
+                tracing::debug!("PPU register read at ${:04X}", address);
+                // Does not work because it requires mutability. True pain.
+                // self.ppu.read_data()
                 0
             }
 
             _ => {
-                tracing::warn!("unimplemented read at ${:04X}", address);
+                if crate::ppu::WRITE_ONLY_REGISTERS.contains(&address) {
+                    tracing::error!(
+                        "attempted to read write-only PPU register at ${:04X}",
+                        address
+                    )
+                } else {
+                    tracing::warn!("unimplemented read at ${:04X}", address);
+                }
                 0
             }
         }

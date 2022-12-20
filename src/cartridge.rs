@@ -2,7 +2,7 @@ use bitflags::bitflags;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
-enum Mirroring {
+pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
@@ -34,7 +34,7 @@ bitflags! {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Header {
-    mirroring: Mirroring,
+    pub mirroring: Mirroring,
     program_rom_pages: usize,
     character_rom_pages: usize,
     has_trainer: bool,
@@ -98,6 +98,7 @@ impl Header {
     }
 }
 
+#[derive(Clone)]
 pub struct Cartridge {
     pub header: Header,
     pub program_rom: Vec<u8>,

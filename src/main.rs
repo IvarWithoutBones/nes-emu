@@ -2,6 +2,7 @@ mod bus;
 mod cartridge;
 mod cpu;
 mod gui;
+mod ppu;
 
 use bus::Bus;
 use clap::Parser;
