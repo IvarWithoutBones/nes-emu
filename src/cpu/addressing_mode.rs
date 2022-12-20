@@ -1,5 +1,5 @@
 use crate::bus::Memory;
-use crate::cpu::CPU;
+use crate::cpu::Cpu;
 use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
@@ -49,7 +49,7 @@ impl AdressingMode {
     }
 
     /// Fetch the address of the operand. Returns the address and a flag indicating if a page boundary was crossed
-    pub fn fetch_param_address(&self, cpu: &CPU) -> (u16, bool) {
+    pub fn fetch_param_address(&self, cpu: &Cpu) -> (u16, bool) {
         let after_opcode = cpu.program_counter.wrapping_add(1);
         match self {
             Self::Immediate | Self::Relative => (after_opcode, false),
@@ -69,13 +69,13 @@ impl AdressingMode {
             Self::AbsoluteX => {
                 let addr_base = cpu.read_word(after_opcode);
                 let addr = addr_base.wrapping_add(cpu.register_x as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
+                (addr, Cpu::is_on_different_page(addr_base, addr))
             }
 
             Self::AbsoluteY => {
                 let addr_base = cpu.read_word(after_opcode);
                 let addr = addr_base.wrapping_add(cpu.register_y as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
+                (addr, Cpu::is_on_different_page(addr_base, addr))
             }
 
             Self::Indirect => {
@@ -111,7 +111,7 @@ impl AdressingMode {
                     cpu.read_byte(ptr.wrapping_add(1) as u16),
                 ]);
                 let addr = addr_base.wrapping_add(cpu.register_y as u16);
-                (addr, CPU::is_on_different_page(addr_base, addr))
+                (addr, Cpu::is_on_different_page(addr_base, addr))
             }
 
             _ => {
@@ -121,7 +121,7 @@ impl AdressingMode {
     }
 
     /// Fetch the operand. Returns the operand and a flag indicating if a page boundary was crossed.
-    pub fn fetch_param(&self, cpu: &CPU) -> (u8, bool) {
+    pub fn fetch_param(&self, cpu: &Cpu) -> (u8, bool) {
         let (addr, page_crossed) = self.fetch_param_address(cpu);
         (cpu.read_byte(addr), page_crossed)
     }

@@ -1,5 +1,5 @@
 use crate::bus::{Clock, Memory};
-use crate::cpu::{addressing_mode::AdressingMode, CpuFlags, CPU};
+use crate::cpu::{addressing_mode::AdressingMode, CpuFlags, Cpu};
 
 pub type CycleCount = u64;
 
@@ -13,7 +13,7 @@ struct Opcode {
 /// A collection of instructions using the same function
 pub struct Instruction {
     pub name: &'static str,
-    pub function: fn(cpu: &mut CPU, mode: &AdressingMode),
+    pub function: fn(cpu: &mut Cpu, mode: &AdressingMode),
     opcodes: &'static [Opcode],
 }
 
@@ -40,7 +40,7 @@ impl Instruction {
     }
 
     /// Format the instruction to a human-readable string, used for debugging
-    pub fn format(&self, cpu: &CPU, mode: &AdressingMode) -> String {
+    pub fn format(&self, cpu: &Cpu, mode: &AdressingMode) -> String {
         let mut args = String::new();
         match mode {
             &AdressingMode::Immediate => {
@@ -76,7 +76,7 @@ impl Instruction {
     Instruction helpers
 */
 
-fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
+fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
     // TODO: should some of this be moved to the addressing mode?
     let after_opcode = cpu.program_counter.wrapping_add(mode.len());
     if condition {
@@ -90,7 +90,7 @@ fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
             after_opcode.wrapping_add(offset as u16)
         };
 
-        if CPU::is_on_different_page(after_opcode, new_pc) {
+        if Cpu::is_on_different_page(after_opcode, new_pc) {
             cpu.tick(1);
         }
 
@@ -104,55 +104,55 @@ fn branch(cpu: &mut CPU, mode: &AdressingMode, condition: bool) {
 mod instructions {
     use super::*;
 
-    pub fn nop(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn nop(cpu: &mut Cpu, mode: &AdressingMode) {
         if mode.has_arguments() {
             // Some illegal opcodes use this with arguments
             cpu.tick_once_if(mode.fetch_param(cpu).1)
         }
     }
 
-    pub fn brk(_cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn brk(_cpu: &mut Cpu, _mode: &AdressingMode) {
         // TODO: Should execute code from the BRK vector
     }
 
-    pub fn jmp(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn jmp(cpu: &mut Cpu, mode: &AdressingMode) {
         cpu.program_counter = mode.fetch_param_address(cpu).0;
     }
 
-    pub fn inx(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn inx(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_x = cpu.register_x.wrapping_add(1);
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn iny(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn iny(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_y = cpu.register_y.wrapping_add(1);
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
-    pub fn inc(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn inc(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_add(1);
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
     }
 
-    pub fn rti(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status = CpuFlags::from_bits_truncate(cpu.pop_byte());
+    pub fn rti(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags = CpuFlags::from_bits_truncate(cpu.pop_byte());
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
-        cpu.status.remove(CpuFlags::BREAK);
-        cpu.status.insert(CpuFlags::BREAK2);
+        cpu.flags.remove(CpuFlags::Break);
+        cpu.flags.insert(CpuFlags::Break2);
         cpu.program_counter = cpu.pop_word();
     }
 
-    pub fn adc(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn adc(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         let (data, overflow1) = cpu.accumulator.overflowing_add(value);
-        let (result, overflow2) = data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_add(cpu.flags.contains(CpuFlags::Carry) as u8);
 
-        cpu.status.set(CpuFlags::CARRY, overflow1 || overflow2);
+        cpu.flags.set(CpuFlags::Carry, overflow1 || overflow2);
         cpu.update_zero_and_negative_flags(result);
-        cpu.status.set(
-            CpuFlags::OVERFLOW,
+        cpu.flags.set(
+            CpuFlags::Overflow,
             (((cpu.accumulator ^ result) & (value ^ result)) & 0x80) != 0,
         );
 
@@ -160,15 +160,15 @@ mod instructions {
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn sbc(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn sbc(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
-        let (result, overflow2) = data.overflowing_sub(!cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_sub(!cpu.flags.contains(CpuFlags::Carry) as u8);
 
-        cpu.status.set(CpuFlags::CARRY, !(overflow1 || overflow2));
+        cpu.flags.set(CpuFlags::Carry, !(overflow1 || overflow2));
         cpu.update_zero_and_negative_flags(result);
-        cpu.status.set(
-            CpuFlags::OVERFLOW,
+        cpu.flags.set(
+            CpuFlags::Overflow,
             (((cpu.accumulator ^ result) & !(value ^ result)) & 0x80) != 0,
         );
 
@@ -176,170 +176,170 @@ mod instructions {
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn cmp(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn cmp(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
-        cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
+        cpu.flags.set(CpuFlags::Carry, cpu.accumulator >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn cpx(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn cpx(cpu: &mut Cpu, mode: &AdressingMode) {
         let value = mode.fetch_param(cpu).0;
-        cpu.status.set(CpuFlags::CARRY, cpu.register_x >= value);
+        cpu.flags.set(CpuFlags::Carry, cpu.register_x >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_x.wrapping_sub(value));
     }
 
-    pub fn cpy(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn cpy(cpu: &mut Cpu, mode: &AdressingMode) {
         let value = mode.fetch_param(cpu).0;
-        cpu.status.set(CpuFlags::CARRY, cpu.register_y >= value);
+        cpu.flags.set(CpuFlags::Carry, cpu.register_y >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.register_y.wrapping_sub(value));
     }
 
-    pub fn dec(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn dec(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_sub(1);
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
     }
 
-    pub fn dey(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn dey(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_y = cpu.register_y.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
-    pub fn dex(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn dex(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_x = cpu.register_x.wrapping_sub(1);
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn bcs(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, cpu.status.contains(CpuFlags::CARRY));
+    pub fn bcs(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, cpu.flags.contains(CpuFlags::Carry));
     }
 
-    pub fn bcc(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, !cpu.status.contains(CpuFlags::CARRY));
+    pub fn bcc(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, !cpu.flags.contains(CpuFlags::Carry));
     }
 
-    pub fn beq(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, cpu.status.contains(CpuFlags::ZERO));
+    pub fn beq(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, cpu.flags.contains(CpuFlags::Zero));
     }
 
-    pub fn bne(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, !cpu.status.contains(CpuFlags::ZERO));
+    pub fn bne(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, !cpu.flags.contains(CpuFlags::Zero));
     }
 
-    pub fn bmi(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, cpu.status.contains(CpuFlags::NEGATIVE));
+    pub fn bmi(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, cpu.flags.contains(CpuFlags::Negative));
     }
 
-    pub fn bpl(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, !cpu.status.contains(CpuFlags::NEGATIVE));
+    pub fn bpl(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, !cpu.flags.contains(CpuFlags::Negative));
     }
 
-    pub fn bvs(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, cpu.status.contains(CpuFlags::OVERFLOW));
+    pub fn bvs(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, cpu.flags.contains(CpuFlags::Overflow));
     }
 
-    pub fn bvc(cpu: &mut CPU, mode: &AdressingMode) {
-        branch(cpu, mode, !cpu.status.contains(CpuFlags::OVERFLOW));
+    pub fn bvc(cpu: &mut Cpu, mode: &AdressingMode) {
+        branch(cpu, mode, !cpu.flags.contains(CpuFlags::Overflow));
     }
 
-    pub fn php(cpu: &mut CPU, _mode: &AdressingMode) {
-        let mut status = cpu.status.clone();
+    pub fn php(cpu: &mut Cpu, _mode: &AdressingMode) {
+        let mut status = cpu.flags.clone();
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
-        status.insert(CpuFlags::BREAK);
-        status.insert(CpuFlags::BREAK2);
+        status.insert(CpuFlags::Break);
+        status.insert(CpuFlags::Break2);
         cpu.push_byte(status.bits());
     }
 
-    pub fn plp(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status = CpuFlags::from_bits_truncate(cpu.pop_byte());
+    pub fn plp(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags = CpuFlags::from_bits_truncate(cpu.pop_byte());
         // See https://www.nesdev.org/wiki/Status_flags#The_B_flag
-        cpu.status.remove(CpuFlags::BREAK);
-        cpu.status.insert(CpuFlags::BREAK2);
+        cpu.flags.remove(CpuFlags::Break);
+        cpu.flags.insert(CpuFlags::Break2);
     }
 
-    pub fn pha(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn pha(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.push_byte(cpu.accumulator);
     }
 
-    pub fn pla(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn pla(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.accumulator = cpu.pop_byte();
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn tax(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn tax(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_x = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn txa(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn txa(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.accumulator = cpu.register_x;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn tay(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn tay(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_y = cpu.accumulator;
         cpu.update_zero_and_negative_flags(cpu.register_y);
     }
 
-    pub fn tya(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn tya(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.accumulator = cpu.register_y;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn clv(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.remove(CpuFlags::OVERFLOW);
+    pub fn clv(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.remove(CpuFlags::Overflow);
     }
 
-    pub fn clc(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.remove(CpuFlags::CARRY);
+    pub fn clc(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.remove(CpuFlags::Carry);
     }
 
-    pub fn cld(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.remove(CpuFlags::DECIMAL);
+    pub fn cld(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.remove(CpuFlags::Decimal);
     }
 
-    pub fn sec(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.insert(CpuFlags::CARRY);
+    pub fn sec(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.insert(CpuFlags::Carry);
     }
 
-    pub fn sed(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.insert(CpuFlags::DECIMAL);
+    pub fn sed(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.insert(CpuFlags::Decimal);
     }
 
-    pub fn sei(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.insert(CpuFlags::IRQ);
+    pub fn sei(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.insert(CpuFlags::InterruptsDisabled);
     }
 
-    pub fn cli(cpu: &mut CPU, _mode: &AdressingMode) {
-        cpu.status.remove(CpuFlags::IRQ);
+    pub fn cli(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.flags.remove(CpuFlags::InterruptsDisabled);
     }
 
-    pub fn jsr(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn jsr(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         cpu.push_word(cpu.program_counter.wrapping_add(mode.len()).wrapping_sub(1));
         cpu.program_counter = addr;
     }
 
-    pub fn rts(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn rts(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.program_counter = cpu.pop_word().wrapping_add(1);
     }
 
-    pub fn lsr(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn lsr(cpu: &mut Cpu, mode: &AdressingMode) {
         let result = if mode == &AdressingMode::Accumulator {
-            cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
+            cpu.flags
+                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 0));
             cpu.accumulator >>= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
             value >>= 1;
             cpu.write_byte(addr, value);
             value
@@ -348,17 +348,17 @@ mod instructions {
         cpu.update_zero_and_negative_flags(result);
     }
 
-    pub fn asl(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn asl(cpu: &mut Cpu, mode: &AdressingMode) {
         let result = if mode == &AdressingMode::Accumulator {
-            cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
+            cpu.flags
+                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 7));
             cpu.accumulator <<= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
             value <<= 1;
             cpu.write_byte(addr, value);
             value
@@ -367,20 +367,20 @@ mod instructions {
         cpu.update_zero_and_negative_flags(result);
     }
 
-    pub fn ror(cpu: &mut CPU, mode: &AdressingMode) {
-        let carry = cpu.status.contains(CpuFlags::CARRY);
+    pub fn ror(cpu: &mut Cpu, mode: &AdressingMode) {
+        let carry = cpu.flags.contains(CpuFlags::Carry);
         let rotate_right = |value: u8| (value >> 1) | ((carry as u8) << 7);
 
         let result = if mode == &AdressingMode::Accumulator {
-            cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 0));
+            cpu.flags
+                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 0));
             cpu.accumulator = rotate_right(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
             value = rotate_right(value);
             cpu.write_byte(addr, value);
             value
@@ -389,20 +389,20 @@ mod instructions {
         cpu.update_zero_and_negative_flags(result);
     }
 
-    pub fn rol(cpu: &mut CPU, mode: &AdressingMode) {
-        let carry = cpu.status.contains(CpuFlags::CARRY);
+    pub fn rol(cpu: &mut Cpu, mode: &AdressingMode) {
+        let carry = cpu.flags.contains(CpuFlags::Carry);
         let rotate_left = |value: u8| (value << 1) | carry as u8;
 
         let result = if mode == &AdressingMode::Accumulator {
-            cpu.status
-                .set(CpuFlags::CARRY, CPU::nth_bit(cpu.accumulator, 7));
+            cpu.flags
+                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 7));
             cpu.accumulator = rotate_left(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
             value = rotate_left(value);
             cpu.write_byte(addr, value);
             value
@@ -411,83 +411,83 @@ mod instructions {
         cpu.update_zero_and_negative_flags(result);
     }
 
-    pub fn and(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn and(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator &= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn eor(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn eor(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator ^= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn ora(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn ora(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator |= value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn lda(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn lda(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator = value;
         cpu.update_zero_and_negative_flags(cpu.accumulator);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn ldx(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn ldx(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.register_x = value;
         cpu.update_zero_and_negative_flags(cpu.register_x);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn ldy(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn ldy(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.register_y = value;
         cpu.update_zero_and_negative_flags(cpu.register_y);
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn sta(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn sta(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.accumulator);
     }
 
-    pub fn stx(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn stx(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.register_x);
     }
 
-    pub fn sty(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn sty(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         cpu.write_byte(addr, cpu.register_y);
     }
 
-    pub fn bit(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn bit(cpu: &mut Cpu, mode: &AdressingMode) {
         let value = mode.fetch_param(cpu).0;
-        cpu.status
-            .set(CpuFlags::ZERO, (cpu.accumulator & value) == 0);
-        cpu.status.set(CpuFlags::NEGATIVE, CPU::nth_bit(value, 7));
-        cpu.status.set(CpuFlags::OVERFLOW, CPU::nth_bit(value, 6));
+        cpu.flags
+            .set(CpuFlags::Zero, (cpu.accumulator & value) == 0);
+        cpu.flags.set(CpuFlags::Negative, Cpu::nth_bit(value, 7));
+        cpu.flags.set(CpuFlags::Overflow, Cpu::nth_bit(value, 6));
     }
 
-    pub fn tsx(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn tsx(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.register_x = cpu.stack_pointer;
         cpu.update_zero_and_negative_flags(cpu.register_x);
     }
 
-    pub fn txs(cpu: &mut CPU, _mode: &AdressingMode) {
+    pub fn txs(cpu: &mut Cpu, _mode: &AdressingMode) {
         cpu.stack_pointer = cpu.register_x;
     }
 
     // Unofficial opcodes
 
-    pub fn lax(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn lax(cpu: &mut Cpu, mode: &AdressingMode) {
         let (value, page_crossed) = mode.fetch_param(cpu);
         cpu.accumulator = value;
         cpu.register_x = value;
@@ -495,35 +495,35 @@ mod instructions {
         cpu.tick_once_if(page_crossed);
     }
 
-    pub fn sax(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn sax(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let result = cpu.accumulator & cpu.register_x;
         cpu.write_byte(addr, result);
     }
 
-    pub fn dcp(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn dcp(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_sub(1);
 
         cpu.write_byte(addr, value);
         cpu.update_zero_and_negative_flags(value);
 
-        cpu.status.set(CpuFlags::CARRY, cpu.accumulator >= value);
+        cpu.flags.set(CpuFlags::Carry, cpu.accumulator >= value);
         // Subtract so that we set the ZERO flag if the values are equal
         cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
     }
 
-    pub fn isb(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn isb(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let value = cpu.read_byte(addr).wrapping_add(1);
 
         let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
-        let (result, overflow2) = data.overflowing_sub(!cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_sub(!cpu.flags.contains(CpuFlags::Carry) as u8);
 
-        cpu.status.set(CpuFlags::CARRY, !(overflow1 || overflow2));
+        cpu.flags.set(CpuFlags::Carry, !(overflow1 || overflow2));
         cpu.update_zero_and_negative_flags(result);
-        cpu.status.set(
-            CpuFlags::OVERFLOW,
+        cpu.flags.set(
+            CpuFlags::Overflow,
             (((cpu.accumulator ^ result) & !(value ^ result)) & 0x80) != 0,
         );
 
@@ -531,11 +531,11 @@ mod instructions {
         cpu.write_byte(addr, value);
     }
 
-    pub fn slo(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn slo(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
-        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
         value <<= 1;
 
         cpu.write_byte(addr, value);
@@ -543,14 +543,14 @@ mod instructions {
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn rla(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn rla(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
-        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let carry = cpu.flags.contains(CpuFlags::Carry);
         let rotate_left = |value: u8| (value << 1) | carry as u8;
 
-        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 7));
+        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
         value = rotate_left(value);
         cpu.write_byte(addr, value);
 
@@ -558,11 +558,11 @@ mod instructions {
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn sre(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn sre(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
-        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
         value >>= 1;
         cpu.write_byte(addr, value);
 
@@ -570,24 +570,24 @@ mod instructions {
         cpu.update_zero_and_negative_flags(cpu.accumulator);
     }
 
-    pub fn rra(cpu: &mut CPU, mode: &AdressingMode) {
+    pub fn rra(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
         let mut value = cpu.read_byte(addr);
 
-        let carry = cpu.status.contains(CpuFlags::CARRY);
+        let carry = cpu.flags.contains(CpuFlags::Carry);
         let rotate_right = |value: u8| (value >> 1) | ((carry as u8) << 7);
 
-        cpu.status.set(CpuFlags::CARRY, CPU::nth_bit(value, 0));
+        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
         value = rotate_right(value);
         cpu.write_byte(addr, value);
 
         let (data, overflow1) = cpu.accumulator.overflowing_add(value);
-        let (result, overflow2) = data.overflowing_add(cpu.status.contains(CpuFlags::CARRY) as u8);
+        let (result, overflow2) = data.overflowing_add(cpu.flags.contains(CpuFlags::Carry) as u8);
 
-        cpu.status.set(CpuFlags::CARRY, overflow1 || overflow2);
+        cpu.flags.set(CpuFlags::Carry, overflow1 || overflow2);
         cpu.update_zero_and_negative_flags(result);
-        cpu.status.set(
-            CpuFlags::OVERFLOW,
+        cpu.flags.set(
+            CpuFlags::Overflow,
             (((cpu.accumulator ^ result) & (value ^ result)) & 0x80) != 0,
         );
 

@@ -194,24 +194,24 @@ impl Gui {
                     ui.label(egui::RichText::new(header_text).strong());
                     ui.end_row();
 
-                    label(ui, "Negative", state.status.contains(CpuFlags::NEGATIVE));
-                    label(ui, "Overflow", state.status.contains(CpuFlags::OVERFLOW));
+                    label(ui, "Negative", state.status.contains(CpuFlags::Negative));
+                    label(ui, "Overflow", state.status.contains(CpuFlags::Overflow));
                     label(
                         ui,
                         "Interrupts disabled",
-                        state.status.contains(CpuFlags::IRQ),
+                        state.status.contains(CpuFlags::InterruptsDisabled),
                     );
-                    label(ui, "Zero", state.status.contains(CpuFlags::ZERO));
-                    label(ui, "Carry", state.status.contains(CpuFlags::CARRY));
+                    label(ui, "Zero", state.status.contains(CpuFlags::Zero));
+                    label(ui, "Carry", state.status.contains(CpuFlags::Carry));
                 });
             egui::Grid::new("flags_grid_two")
                 .striped(true)
                 .show(ui, |ui| {
                     ui.end_row(); // Spacing because the previous grid contains the header label
 
-                    label(ui, "Decimal", state.status.contains(CpuFlags::DECIMAL));
-                    label(ui, "Break", state.status.contains(CpuFlags::BREAK));
-                    label(ui, "Break2", state.status.contains(CpuFlags::BREAK2));
+                    label(ui, "Decimal", state.status.contains(CpuFlags::Decimal));
+                    label(ui, "Break", state.status.contains(CpuFlags::Break));
+                    label(ui, "Break2", state.status.contains(CpuFlags::Break2));
                 });
         });
     }

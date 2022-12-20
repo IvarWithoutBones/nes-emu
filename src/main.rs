@@ -5,7 +5,7 @@ mod gui;
 
 use bus::Bus;
 use clap::Parser;
-use cpu::CPU;
+use cpu::Cpu;
 use gui::{step_state::StepState, Gui};
 use std::{sync::mpsc::channel, thread};
 use tracing;
@@ -59,7 +59,7 @@ fn main() {
     // Actually spawn the CPU thread
     let cpu_handle = thread::spawn(move || {
         let mut step_state = StepState::default();
-        let mut cpu = CPU::new(bus);
+        let mut cpu = Cpu::new(bus);
         cpu.reset();
 
         loop {
