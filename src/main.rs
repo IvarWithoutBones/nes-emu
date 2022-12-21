@@ -63,7 +63,12 @@ fn main() {
         let mut cpu = Cpu::new(bus);
         cpu.reset();
 
+        let mut index = 0;
         loop {
+            if index == 100 {
+                break;
+            }
+
             if let Some(step_receiver) = step_receiver.as_ref() {
                 if let Ok(new_step_state) = step_receiver.try_recv() {
                     step_state = new_step_state;
@@ -88,6 +93,8 @@ fn main() {
                 // Some sort of error occured, should communicate to the GUI in the future.
                 break;
             }
+
+            index += 1;
         }
     });
 

@@ -1,5 +1,5 @@
 use crate::bus::{Clock, Memory};
-use crate::cpu::{addressing_mode::AdressingMode, CpuFlags, Cpu};
+use crate::cpu::{addressing_mode::AdressingMode, Cpu, CpuFlags};
 
 pub type CycleCount = u64;
 
@@ -40,11 +40,11 @@ impl Instruction {
     }
 
     /// Format the instruction to a human-readable string, used for debugging
-    pub fn format(&self, cpu: &Cpu, mode: &AdressingMode) -> String {
+    pub fn format(&self, cpu: &mut Cpu, mode: &AdressingMode) -> String {
         let mut args = String::new();
         match mode {
             &AdressingMode::Immediate => {
-                args = format!("#${:02X}", cpu.read_byte(mode.fetch_param_address(cpu).0));
+                args = format!("#${:02X}", mode.fetch_param(cpu).0);
             }
 
             &AdressingMode::Relative => {
@@ -61,7 +61,6 @@ impl Instruction {
             }
 
             // TODO: formatting of indirect modes
-
             _ => {
                 if mode.has_arguments() {
                     args = format!("${:04X}", mode.fetch_param_address(cpu).0)
@@ -80,7 +79,7 @@ fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
     // TODO: should some of this be moved to the addressing mode?
     let after_opcode = cpu.program_counter.wrapping_add(mode.len());
     if condition {
-        let offset = cpu.read_byte(mode.fetch_param_address(cpu).0);
+        let offset = mode.fetch_param(cpu).0;
         cpu.tick(1);
 
         // Two's complement signed offset to branch backwards
@@ -107,7 +106,8 @@ mod instructions {
     pub fn nop(cpu: &mut Cpu, mode: &AdressingMode) {
         if mode.has_arguments() {
             // Some illegal opcodes use this with arguments
-            cpu.tick_once_if(mode.fetch_param(cpu).1)
+            let crossed_page = mode.fetch_param_address(cpu).1;
+            cpu.tick_once_if(crossed_page);
         }
     }
 

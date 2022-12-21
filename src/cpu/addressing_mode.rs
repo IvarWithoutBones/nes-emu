@@ -49,7 +49,7 @@ impl AdressingMode {
     }
 
     /// Fetch the address of the operand. Returns the address and a flag indicating if a page boundary was crossed
-    pub fn fetch_param_address(&self, cpu: &Cpu) -> (u16, bool) {
+    pub fn fetch_param_address(&self, cpu: &mut Cpu) -> (u16, bool) {
         let after_opcode = cpu.program_counter.wrapping_add(1);
         match self {
             Self::Immediate | Self::Relative => (after_opcode, false),
@@ -121,7 +121,7 @@ impl AdressingMode {
     }
 
     /// Fetch the operand. Returns the operand and a flag indicating if a page boundary was crossed.
-    pub fn fetch_param(&self, cpu: &Cpu) -> (u8, bool) {
+    pub fn fetch_param(&self, cpu: &mut Cpu) -> (u8, bool) {
         let (addr, page_crossed) = self.fetch_param_address(cpu);
         (cpu.read_byte(addr), page_crossed)
     }

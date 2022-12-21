@@ -82,8 +82,8 @@ impl Cpu {
         self.register_y = 0;
 
         // This is a hack to skip graphic init in nestest
-        self.program_counter = 0xC000;
-        // self.program_counter = self.read_word(Cpu::RESET_VECTOR);
+        // self.program_counter = 0xC000;
+        self.program_counter = self.read_word(Cpu::RESET_VECTOR);
         tracing::info!("resetting. PC={:04X}", self.program_counter);
     }
 
@@ -168,7 +168,7 @@ impl Cpu {
 }
 
 impl Memory for Cpu {
-    fn read_byte(&self, address: u16) -> u8 {
+    fn read_byte(&mut self, address: u16) -> u8 {
         self.bus.read_byte(address)
     }
 

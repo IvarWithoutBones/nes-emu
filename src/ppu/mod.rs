@@ -1,22 +1,21 @@
 #![allow(dead_code)] // TODO: remove
 
-mod registers;
+pub(crate) mod registers;
 
 use crate::cartridge::Mirroring;
-use registers::{AddressRegister, ControlRegister};
-
-pub const WRITE_ONLY_REGISTERS: [u16; 6] =
-    [0x2000, 0x2001, 0x2003, 0x2005, 0x2006, 0x4014];
+use registers::{Address, Control};
 
 /// https://www.nesdev.org/wiki/PPU
 pub struct Ppu {
+    span: tracing::Span,
+
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
     object_attribute_data: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
     data_buffer: u8,
 
-    address: AddressRegister,
-    control: ControlRegister,
+    address: Address,
+    control: Control,
 
     mirroring: Mirroring,
     character_rom: Vec<u8>,
@@ -38,15 +37,22 @@ impl Ppu {
 
     pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
         Self {
+            span: tracing::span!(tracing::Level::INFO, "ppu"),
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
             object_attribute_data: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
             vram: [0; Self::VRAM_SIZE],
             data_buffer: 0,
-            address: AddressRegister::default(),
-            control: ControlRegister::default(),
+            address: Address::default(),
+            control: Control::default(),
             mirroring,
             character_rom,
         }
+    }
+
+    fn update_buffer(&mut self, value: u8) -> u8 {
+        let result = self.data_buffer;
+        self.data_buffer = value;
+        result
     }
 
     fn increment_vram_address(&mut self) {
@@ -69,27 +75,24 @@ impl Ppu {
         }
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn read_data(&mut self) -> u8 {
         let addr = self.address.value;
         self.increment_vram_address();
 
         match addr {
             Self::PATTERN_TABLE_START..=Self::PATTERN_TABLE_END => {
-                tracing::debug!(addr, "pattern table read");
-                let result = self.data_buffer;
-                self.data_buffer = self.character_rom[addr as usize];
-                result
+                tracing::trace!(addr, "pattern table read");
+                self.update_buffer(self.character_rom[addr as usize])
             }
 
             Self::NAMETABLE_START..=Self::NAMETABLE_MIRRORS_END => {
-                tracing::debug!(addr, "nametable read");
-                let result = self.data_buffer;
-                self.data_buffer = self.vram[self.mirror_nametable_addr(addr) as usize];
-                result
+                tracing::trace!(addr, "nametable read");
+                self.update_buffer(self.vram[self.mirror_nametable_addr(addr) as usize])
             }
 
             Self::PALETTE_RAM_START..=Self::PALETTE_RAM_MIRRORS_END => {
-                tracing::debug!(addr, "palette ram read");
+                tracing::trace!(addr, "palette ram read");
                 self.palette_table[(addr - Self::PALETTE_RAM_START) as usize]
             }
 

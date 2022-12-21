@@ -1,15 +1,10 @@
 use crate::cartridge::Cartridge;
 use crate::ppu::Ppu;
 
+pub const CPU_RAM_SIZE: usize = 2048;
+
 pub const PROGRAM_ROM_START: u16 = 0x8000;
 const PROGRAM_ROM_END: u16 = 0xFFFF;
-
-pub const CPU_RAM_SIZE: usize = 2048;
-const CPU_RAM_START: u16 = 0x0000;
-const CPU_RAM_MIRROR_END: u16 = 0x1FFF;
-
-const PPU_REGISTERS: u16 = 0x2000;
-const PPU_REGISTERS_MIRROR_END: u16 = 0x3FFF;
 
 pub trait Clock {
     const MULTIPLIER: u64 = 1;
@@ -30,10 +25,10 @@ pub trait Clock {
 }
 
 pub trait Memory {
-    fn read_byte(&self, address: u16) -> u8;
+    fn read_byte(&mut self, address: u16) -> u8;
     fn write_byte(&mut self, address: u16, data: u8);
 
-    fn read_word(&self, address: u16) -> u16 {
+    fn read_word(&mut self, address: u16) -> u16 {
         u16::from_le_bytes([self.read_byte(address), self.read_byte(address + 1)])
     }
 
@@ -45,6 +40,7 @@ pub trait Memory {
 }
 
 pub struct Bus {
+    span: tracing::Span,
     pub cartridge: Cartridge,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
     pub cycles: u64,
@@ -52,12 +48,14 @@ pub struct Bus {
 }
 
 impl Bus {
-    const SPAN_NAME: &'static str = "bus";
+    const CPU_RAM_START: u16 = 0x0000;
+    const CPU_RAM_MIRROR_END: u16 = 0x1FFF;
 
     fn from_cart(cart: Cartridge) -> Bus {
-        let _span = tracing::span!(tracing::Level::INFO, Bus::SPAN_NAME).entered();
+        let span = tracing::span!(tracing::Level::INFO, "bus");
         tracing::info!("succesfully initialized");
         Bus {
+            span,
             cartridge: cart.clone(),
             ppu: Ppu::new(cart.character_rom, cart.header.mirroring),
             cpu_ram: [0; CPU_RAM_SIZE],
@@ -115,38 +113,33 @@ impl Bus {
 }
 
 impl Memory for Bus {
-    fn read_byte(&self, address: u16) -> u8 {
-        let _span = tracing::span!(tracing::Level::INFO, Bus::SPAN_NAME).entered();
+    #[tracing::instrument(skip(self, address), parent = &self.span, level = tracing::Level::TRACE)]
+    fn read_byte(&mut self, address: u16) -> u8 {
         match address {
-            CPU_RAM_START..=CPU_RAM_MIRROR_END => self.read_cpu_ram(address),
+            Self::CPU_RAM_START..=Self::CPU_RAM_MIRROR_END => self.read_cpu_ram(address),
             PROGRAM_ROM_START..=PROGRAM_ROM_END => self.read_program_rom(address),
 
-            // TODO: do we have to consider mirroring?
-            PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
-                tracing::debug!("PPU register read at ${:04X}", address);
-                // Does not work because it requires mutability. True pain.
-                // self.ppu.read_data()
-                0
-            }
-
             _ => {
-                if crate::ppu::WRITE_ONLY_REGISTERS.contains(&address) {
-                    tracing::error!(
-                        "attempted to read write-only PPU register at ${:04X}",
-                        address
-                    )
-                } else {
-                    tracing::warn!("unimplemented read at ${:04X}", address);
+                if let Some(mutability) = crate::ppu::registers::get_mutability(address) {
+                    if mutability.readable() {
+                        tracing::trace!("PPU register read at ${:04X}", address);
+                        return self.ppu.read_data();
+                    } else {
+                        tracing::error!("reading write-only PPU register ${:04X}", address);
+                        panic!()
+                    }
                 }
+
+                tracing::warn!("unimplemented read at ${:04X}", address);
                 0
             }
         }
     }
 
+    #[tracing::instrument(skip(self, address, data), parent = &self.span)]
     fn write_byte(&mut self, address: u16, data: u8) {
-        let _span = tracing::span!(tracing::Level::INFO, Bus::SPAN_NAME).entered();
         match address {
-            CPU_RAM_START..=CPU_RAM_MIRROR_END => self.write_cpu_ram(address, data),
+            Self::CPU_RAM_START..=Self::CPU_RAM_MIRROR_END => self.write_cpu_ram(address, data),
 
             PROGRAM_ROM_START..=PROGRAM_ROM_END => tracing::warn!(
                 "attempted to write to program ROM at ${:04X}: ${:02X}",
@@ -154,15 +147,23 @@ impl Memory for Bus {
                 data
             ),
 
-            PPU_REGISTERS..=PPU_REGISTERS_MIRROR_END => {
-                tracing::warn!(
-                    "unimplemented PPU register write at ${:04X}: ${:02X}",
-                    address,
-                    data
-                );
-            }
+            _ => {
+                if let Some(mutability) = crate::ppu::registers::get_mutability(address) {
+                    if mutability.writable() {
+                        tracing::warn!(
+                            "unimplemented PPU register write at ${:04X}: ${:02X}",
+                            address,
+                            data
+                        );
+                        return; // TODO: right call
+                    } else {
+                        tracing::error!("writing read-only PPU register ${:04X}", address);
+                        panic!()
+                    }
+                }
 
-            _ => tracing::warn!("unimplemented write at ${:04X}: ${:02X}", address, data),
+                tracing::warn!("unimplemented write at ${:04X}: ${:02X}", address, data);
+            }
         }
     }
 }
