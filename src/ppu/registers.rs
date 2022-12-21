@@ -84,3 +84,74 @@ impl AddressRegister {
         self.latch_high = true;
     }
 }
+
+bitflags! {
+    /// https://www.nesdev.org/wiki/PPU_registers#PPUMASK
+    pub struct MaskRegister: u8 {
+        const Greyscale              = 0b0000_0001;
+        const ShowLeftmostBackground = 0b0000_0010;
+        const ShowLeftmostSprites    = 0b0000_0100;
+        const ShowBackground         = 0b0000_1000;
+        const ShowSprites            = 0b0001_0000;
+        const EmphasizeRed           = 0b0010_0000;
+        const EmphasizeGreen         = 0b0100_0000;
+        const EmphasizeBlue          = 0b1000_0000;
+    }
+}
+
+impl Default for MaskRegister {
+    fn default() -> Self {
+        Self::from_bits_truncate(0)
+    }
+}
+
+impl MaskRegister {
+    fn update(&mut self, value: u8) {
+        Self::from_bits_truncate(value);
+    }
+}
+
+bitflags! {
+    /// https://www.nesdev.org/wiki/PPU_registers#PPUSTATUS
+    pub struct StatusRegister: u8 {
+        // TODO: does masking multiple bits work?
+        const OpenBus        = 0b0001_1111;
+        const SpriteOverflow = 0b0010_0000;
+        const SpriteZeroHit  = 0b0100_0000;
+        const VBlankStarted  = 0b1000_0000;
+    }
+}
+
+impl Default for StatusRegister {
+    fn default() -> Self {
+        Self::from_bits_truncate(0)
+    }
+}
+
+impl StatusRegister {
+    fn update(&mut self, value: u8) {
+        Self::from_bits_truncate(value);
+    }
+}
+
+/// https://www.nesdev.org/wiki/PPU_registers#OAMDMA
+pub struct OamDmaRegister {
+    pub value: u8,
+}
+
+impl Default for OamDmaRegister {
+    fn default() -> Self {
+        Self { value: 0 }
+    }
+}
+
+/// https://www.nesdev.org/wiki/PPU_registers#OAMADDR
+pub struct OamAddressRegister {
+    pub value: u8,
+}
+
+impl Default for OamAddressRegister {
+    fn default() -> Self {
+        Self { value: 0 }
+    }
+}

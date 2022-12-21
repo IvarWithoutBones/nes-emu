@@ -83,8 +83,8 @@ impl Cpu {
 
         // This is a hack to skip graphic init in nestest
         self.program_counter = 0xC000;
-        self.program_counter = self.read_word(Cpu::RESET_VECTOR);
-        // tracing::info!("resetting. PC={:04X}", self.program_counter);
+        // self.program_counter = self.read_word(Cpu::RESET_VECTOR);
+        tracing::info!("resetting. PC={:04X}", self.program_counter);
     }
 
     /// Get the status of bit N
