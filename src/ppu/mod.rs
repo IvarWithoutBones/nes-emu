@@ -2,6 +2,7 @@ pub(crate) mod registers;
 
 use crate::cartridge::Mirroring;
 use registers::Register;
+use std::ops::RangeInclusive;
 
 /// https://www.nesdev.org/wiki/PPU
 pub struct Ppu {
@@ -12,31 +13,26 @@ pub struct Ppu {
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
     object_attribute_table: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
-    data_buffer: u8,
 
     control: registers::Control,
     mask: registers::Mask,
     status: registers::Status,
     object_attribute_address: registers::ObjectAttributeAddress,
-    object_attribute_data: registers::ObjectAttributeData,
+    // object_attribute_data: registers::ObjectAttributeData,
     scroll: registers::Scroll,
     address: registers::Address,
+    data: registers::Data,
     object_attribute_direct_memory_access: registers::ObjectAttributeDirectMemoryAccess,
 }
 
 impl Ppu {
-    const PALETTE_TABLE_SIZE: usize = 0x20;
+    const PATTERN_TABLE_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
+    const NAMETABLE_RANGE: RangeInclusive<u16> = 0x2000..=0x3EFF;
+    const PALETTE_RAM_RANGE: RangeInclusive<u16> = 0x3F00..=0x3FFF;
+
+    const PALETTE_TABLE_SIZE: usize = 32;
     const OBJECT_ATTRIBUTE_TABLE_SIZE: usize = 0x100;
     const VRAM_SIZE: usize = 0x800;
-
-    const PATTERN_TABLE_START: u16 = 0;
-    const PATTERN_TABLE_END: u16 = 0x1FFF;
-
-    const NAMETABLE_START: u16 = 0x2000;
-    const NAMETABLE_MIRRORS_END: u16 = 0x3EFF;
-
-    const PALETTE_RAM_START: u16 = 0x3F00;
-    const PALETTE_RAM_MIRRORS_END: u16 = 0x3FFF;
 
     pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
         Self {
@@ -47,29 +43,18 @@ impl Ppu {
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
             object_attribute_table: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
             vram: [0; Self::VRAM_SIZE],
-            data_buffer: 0,
 
             control: registers::Control::default(),
             mask: registers::Mask::default(),
             status: registers::Status::default(),
             object_attribute_address: registers::ObjectAttributeAddress::default(),
-            object_attribute_data: registers::ObjectAttributeData::default(),
+            // object_attribute_data: registers::ObjectAttributeData::default(),
             scroll: registers::Scroll::default(),
             address: registers::Address::default(),
+            data: registers::Data::default(),
             object_attribute_direct_memory_access:
                 registers::ObjectAttributeDirectMemoryAccess::default(),
         }
-    }
-
-    fn update_buffer(&mut self, value: u8) -> u8 {
-        let result = self.data_buffer;
-        self.data_buffer = value;
-        result
-    }
-
-    fn increment_vram_address(&mut self) {
-        self.address
-            .increment(self.control.vram_address_increment());
     }
 
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
@@ -87,39 +72,93 @@ impl Ppu {
         }
     }
 
+    fn mirror_palette_table(&self, addr: u16) -> usize {
+        ((addr % Self::PALETTE_TABLE_SIZE as u16) - Self::PALETTE_RAM_RANGE.start()) as usize
+    }
+
+    fn increment_vram_address(&mut self) {
+        self.address
+            .increment(self.control.vram_address_increment());
+    }
+
+    /// Helper for reading from OAMDATA
     #[tracing::instrument(skip(self), parent = &self.span)]
-    pub fn read_data(&mut self) -> u8 {
+    fn read_object_attribute(&mut self) -> u8 {
+        // TODO: do we increment OAMADDR when not in vertical or forced blanking?
+        // TODO: do we index with the OAMDATA value in any scenario?
+        let index = self.object_attribute_address.value as usize;
+        let result = self.object_attribute_table[index];
+        tracing::trace!("object attribute read at ${:02X}: ${:02X}", index, result);
+        result
+    }
+
+    /// Helper for writing to OAMDATA
+    #[tracing::instrument(skip(self), parent = &self.span)]
+    fn write_object_attribute(&mut self, data: u8) {
+        // TODO: do we index with the OAMDATA value in any scenario?
+        let index = self.object_attribute_address.value as usize;
+        tracing::trace!("object attribute write at ${:02X}: ${:02X}", index, data);
+        self.object_attribute_table[index] = data;
+        self.object_attribute_address.increment();
+    }
+
+    /// Helper for reading from PPUDATA
+    #[tracing::instrument(skip(self), parent = &self.span)]
+    fn read_data(&mut self) -> u8 {
         let addr = self.address.value;
         self.increment_vram_address();
 
-        match addr {
-            Self::PATTERN_TABLE_START..=Self::PATTERN_TABLE_END => {
-                tracing::trace!(addr, "pattern table read");
-                self.update_buffer(self.character_rom[addr as usize])
-            }
-
-            Self::NAMETABLE_START..=Self::NAMETABLE_MIRRORS_END => {
-                tracing::trace!(addr, "nametable read");
-                self.update_buffer(self.vram[self.mirror_nametable_addr(addr) as usize])
-            }
-
-            Self::PALETTE_RAM_START..=Self::PALETTE_RAM_MIRRORS_END => {
-                tracing::trace!(addr, "palette ram read");
-                self.palette_table[(addr - Self::PALETTE_RAM_START) as usize]
-            }
-
-            _ => {
-                tracing::error!(addr, "invalid data read");
-                panic!()
-            }
+        if Self::PATTERN_TABLE_RANGE.contains(&addr) {
+            let result = self.character_rom[addr as usize];
+            tracing::trace!("pattern table read at ${:04X}: ${:02X}", addr, result);
+            return self.data.update_buffer(result);
+        } else if Self::NAMETABLE_RANGE.contains(&addr) {
+            let result = self.vram[self.mirror_nametable_addr(addr) as usize];
+            tracing::trace!("nametable read at ${:04X}: ${:02X}", addr, result);
+            return self.data.update_buffer(result);
+        } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
+            // TODO: This should set the data buffer to the nametable "below" the pattern table
+            let result = self.palette_table[self.mirror_palette_table(addr)];
+            tracing::trace!("palette RAM read at ${:04X}: ${:02X}", addr, result);
+            return result;
+        } else {
+            tracing::error!("invalid data read at ${:04X}", addr);
+            panic!()
         }
+    }
+
+    /// Helper for writing with PPUDATA
+    #[tracing::instrument(skip(self), parent = &self.span)]
+    fn write_data(&mut self, data: u8) {
+        let addr = self.address.value;
+
+        if Self::PATTERN_TABLE_RANGE.contains(&addr) {
+            tracing::error!(
+                "attempting to write to read-only character ROM at ${:04X}: ${:02X}",
+                addr,
+                data
+            );
+        } else if Self::NAMETABLE_RANGE.contains(&addr) {
+            let vram_index = self.mirror_nametable_addr(addr) as usize;
+            tracing::trace!("nametable write at ${:04X}: ${:02X}", vram_index, data);
+            self.vram[vram_index] = data;
+        } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
+            let palette_index = self.mirror_palette_table(addr);
+            tracing::trace!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
+            self.palette_table[palette_index] = data;
+        } else {
+            tracing::error!("invalid data write at ${:04X}: ${:02X}", addr, data);
+            panic!()
+        }
+
+        self.increment_vram_address();
     }
 
     #[tracing::instrument(skip(self, register), parent = &self.span)]
     pub fn read_register(&mut self, register: &Register) -> u8 {
         let result = match register {
             Register::Status => self.status.read(),
-            Register::ObjectAttributeData => self.object_attribute_data.read(),
+            Register::ObjectAttributeData => self.read_object_attribute(),
             Register::Data => self.read_data(),
             _ => {
                 tracing::error!("unimplemented register {:?} read", register);
@@ -132,15 +171,14 @@ impl Ppu {
 
     #[tracing::instrument(skip(self, register, data), parent = &self.span)]
     pub fn write_register(&mut self, register: &Register, data: u8) {
-        tracing::trace!("register write: ${:02X}", data);
         match register {
             Register::Control => self.control.update(data),
             Register::Mask => self.mask.update(data),
             Register::ObjectAttributeAddress => self.object_attribute_address.update(data),
-            Register::ObjectAttributeData => self.object_attribute_data.update(data),
+            Register::ObjectAttributeData => self.write_object_attribute(data),
             Register::Scroll => self.scroll.update(data),
             Register::Address => self.address.update(data),
-            // Register::Data
+            Register::Data => self.write_data(data),
             Register::ObjectAttributeDirectMemoryAccess => {
                 self.object_attribute_direct_memory_access.update(data)
             }
@@ -153,5 +191,6 @@ impl Ppu {
                 panic!()
             }
         }
+        tracing::trace!("register {:?} write: ${:02X}", register, data);
     }
 }

@@ -184,43 +184,49 @@ impl ObjectAttributeAddress {
     pub fn update(&mut self, data: u8) {
         self.value = data;
     }
+
+    pub fn increment(&mut self) {
+        self.value = self.value.wrapping_add(1);
+    }
 }
 
 /// https://www.nesdev.org/wiki/PPU_registers#OAMDATA
-pub struct ObjectAttributeData {
-    pub value: u8,
-}
-
-impl Default for ObjectAttributeData {
-    fn default() -> Self {
-        Self { value: 0 }
-    }
-}
-
-impl ObjectAttributeData {
-    pub fn read(&self) -> u8 {
-        self.value
-    }
-
-    pub fn update(&mut self, data: u8) {
-        self.value = data;
-    }
-}
+// pub struct ObjectAttributeData {
+//     pub value: u8,
+// }
+//
+// impl Default for ObjectAttributeData {
+//     fn default() -> Self {
+//         Self { value: 0 }
+//     }
+// }
 
 /// https://www.nesdev.org/wiki/PPU_registers#PPUSCROLL
 pub struct Scroll {
-    pub value: u8,
+    horizontal: u8,
+    vertical: u8,
+    horizontal_latch: bool,
 }
 
 impl Default for Scroll {
     fn default() -> Self {
-        Self { value: 0 }
+        Self {
+            horizontal: 0,
+            vertical: 0,
+            horizontal_latch: true,
+        }
     }
 }
 
 impl Scroll {
     pub fn update(&mut self, data: u8) {
-        self.value = data;
+        if self.horizontal_latch {
+            self.horizontal = data;
+        } else {
+            self.vertical = data;
+        }
+
+        self.horizontal_latch = !self.horizontal_latch;
     }
 }
 
@@ -266,12 +272,30 @@ impl Address {
         self.mirror();
     }
 
-    fn reset_latch(&mut self) {
-        self.latch_high = true;
+    // fn reset_latch(&mut self) {
+    //     self.latch_high = true;
+    // }
+}
+
+/// https://www.nesdev.org/wiki/PPU_registers#PPUDATA
+pub struct Data {
+    buffer: u8,
+}
+
+impl Default for Data {
+    fn default() -> Self {
+        Self { buffer: 0 }
     }
 }
 
-// TODO: Move PPUDATA here?
+impl Data {
+    /// Updates the internal data buffer, used for reading. Returns the previous contents.
+    pub fn update_buffer(&mut self, value: u8) -> u8 {
+        let result = self.buffer;
+        self.buffer = value;
+        result
+    }
+}
 
 /// https://www.nesdev.org/wiki/PPU_registers#OAMDMA
 pub struct ObjectAttributeDirectMemoryAccess {
