@@ -1,24 +1,27 @@
-#![allow(dead_code)] // TODO: remove
-
 pub(crate) mod registers;
 
 use crate::cartridge::Mirroring;
-use registers::{Address, Control};
+use registers::Register;
 
 /// https://www.nesdev.org/wiki/PPU
 pub struct Ppu {
     span: tracing::Span,
+    mirroring: Mirroring,
+    character_rom: Vec<u8>,
 
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
-    object_attribute_data: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
+    object_attribute_table: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
     data_buffer: u8,
 
-    address: Address,
-    control: Control,
-
-    mirroring: Mirroring,
-    character_rom: Vec<u8>,
+    control: registers::Control,
+    mask: registers::Mask,
+    status: registers::Status,
+    object_attribute_address: registers::ObjectAttributeAddress,
+    object_attribute_data: registers::ObjectAttributeData,
+    scroll: registers::Scroll,
+    address: registers::Address,
+    object_attribute_direct_memory_access: registers::ObjectAttributeDirectMemoryAccess,
 }
 
 impl Ppu {
@@ -38,14 +41,23 @@ impl Ppu {
     pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
-            palette_table: [0; Self::PALETTE_TABLE_SIZE],
-            object_attribute_data: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
-            vram: [0; Self::VRAM_SIZE],
-            data_buffer: 0,
-            address: Address::default(),
-            control: Control::default(),
             mirroring,
             character_rom,
+
+            palette_table: [0; Self::PALETTE_TABLE_SIZE],
+            object_attribute_table: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
+            vram: [0; Self::VRAM_SIZE],
+            data_buffer: 0,
+
+            control: registers::Control::default(),
+            mask: registers::Mask::default(),
+            status: registers::Status::default(),
+            object_attribute_address: registers::ObjectAttributeAddress::default(),
+            object_attribute_data: registers::ObjectAttributeData::default(),
+            scroll: registers::Scroll::default(),
+            address: registers::Address::default(),
+            object_attribute_direct_memory_access:
+                registers::ObjectAttributeDirectMemoryAccess::default(),
         }
     }
 
@@ -98,6 +110,46 @@ impl Ppu {
 
             _ => {
                 tracing::error!(addr, "invalid data read");
+                panic!()
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, register), parent = &self.span)]
+    pub fn read_register(&mut self, register: &Register) -> u8 {
+        let result = match register {
+            Register::Status => self.status.read(),
+            Register::ObjectAttributeData => self.object_attribute_data.read(),
+            Register::Data => self.read_data(),
+            _ => {
+                tracing::error!("unimplemented register {:?} read", register);
+                panic!()
+            }
+        };
+        tracing::trace!("register {:?} read: ${:02X}", register, result);
+        result
+    }
+
+    #[tracing::instrument(skip(self, register, data), parent = &self.span)]
+    pub fn write_register(&mut self, register: &Register, data: u8) {
+        tracing::trace!("register write: ${:02X}", data);
+        match register {
+            Register::Control => self.control.update(data),
+            Register::Mask => self.mask.update(data),
+            Register::ObjectAttributeAddress => self.object_attribute_address.update(data),
+            Register::ObjectAttributeData => self.object_attribute_data.update(data),
+            Register::Scroll => self.scroll.update(data),
+            Register::Address => self.address.update(data),
+            // Register::Data
+            Register::ObjectAttributeDirectMemoryAccess => {
+                self.object_attribute_direct_memory_access.update(data)
+            }
+            _ => {
+                tracing::error!(
+                    "unimplemented register {:?} write of ${:02X}",
+                    register,
+                    data
+                );
                 panic!()
             }
         }

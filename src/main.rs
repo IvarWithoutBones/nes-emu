@@ -65,7 +65,7 @@ fn main() {
 
         let mut index = 0;
         loop {
-            if index == 100 {
+            if index == 1000 {
                 break;
             }
 

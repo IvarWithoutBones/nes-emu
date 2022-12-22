@@ -23,24 +23,44 @@ impl Mutability {
     }
 }
 
-// TODO: should probably contain something to look up the register function
-pub const REGISTERS: [(u16, Mutability); 9] = [
-    (0x2000, Mutability::Write),     // Control
-    (0x2001, Mutability::Write),     // Mask
-    (0x2002, Mutability::Read),      // Status
-    (0x2003, Mutability::Write),     // ObjectAttributeAddress
-    (0x2004, Mutability::ReadWrite), // ObjectAttributeData
-    (0x2005, Mutability::Write),     // Scroll
-    (0x2006, Mutability::Write),     // Address
-    (0x2007, Mutability::ReadWrite), // Data
-    (0x4014, Mutability::Write),     // ObjectAttributeDirectMemoryAccess
+#[derive(Debug, PartialEq)]
+pub enum Register {
+    Control,
+    Mask,
+    Status,
+    ObjectAttributeAddress,
+    ObjectAttributeData,
+    Scroll,
+    Address,
+    Data,
+    ObjectAttributeDirectMemoryAccess,
+}
+
+const REGISTERS: [(u16, Register, Mutability); 9] = [
+    (0x2000, Register::Control, Mutability::Write),
+    (0x2001, Register::Mask, Mutability::Write),
+    (0x2002, Register::Status, Mutability::Read),
+    (0x2003, Register::ObjectAttributeAddress, Mutability::Write),
+    (0x2004, Register::ObjectAttributeData, Mutability::ReadWrite),
+    (0x2005, Register::Scroll, Mutability::Write),
+    (0x2006, Register::Address, Mutability::Write),
+    (0x2007, Register::Data, Mutability::ReadWrite),
+    (
+        0x4014,
+        Register::ObjectAttributeDirectMemoryAccess,
+        Mutability::Write,
+    ),
 ];
 
-pub fn get_mutability(address: u16) -> Option<&'static Mutability> {
+pub fn get_register(address: u16) -> Option<(&'static Register, &'static Mutability)> {
     // TODO: consider mirroring
-    REGISTERS
-        .iter()
-        .find_map(|r| if r.0 == address { Some(&r.1) } else { None })
+    REGISTERS.iter().find_map(|r| {
+        if r.0 == address {
+            Some((&r.1, &r.2))
+        } else {
+            None
+        }
+    })
 }
 
 bitflags! {
@@ -64,18 +84,18 @@ impl Default for Control {
 }
 
 impl Control {
-    const VRAM_ADDR_INCREMENT_IF_FLAG: u8 = 32;
-    const VRAM_ADDR_INCREMENT_NO_FLAG: u8 = 1;
-
     pub fn vram_address_increment(&self) -> u8 {
+        const VRAM_ADDR_INCREMENT_IF_FLAG: u8 = 32;
+        const VRAM_ADDR_INCREMENT_NO_FLAG: u8 = 1;
+
         if self.contains(Self::VramAdressIncrement) {
-            Self::VRAM_ADDR_INCREMENT_IF_FLAG
+            VRAM_ADDR_INCREMENT_IF_FLAG
         } else {
-            Self::VRAM_ADDR_INCREMENT_NO_FLAG
+            VRAM_ADDR_INCREMENT_NO_FLAG
         }
     }
 
-    fn update(&mut self, value: u8) {
+    pub fn update(&mut self, value: u8) {
         Self::from_bits_truncate(value);
     }
 }
@@ -101,7 +121,7 @@ impl Default for Mask {
 }
 
 impl Mask {
-    fn update(&mut self, value: u8) {
+    pub fn update(&mut self, value: u8) {
         Self::from_bits_truncate(value);
     }
 }
@@ -123,9 +143,29 @@ impl Default for Status {
     }
 }
 
+impl std::fmt::Display for Status {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut string = String::with_capacity(3);
+        string.push(self.format(Self::VBlankStarted, 'V'));
+        string.push(self.format(Self::SpriteZeroHit, 'Z'));
+        string.push(self.format(Self::SpriteOverflow, 'O'));
+        write!(f, "{}", string)
+    }
+}
+
 impl Status {
-    fn update(&mut self, value: u8) {
-        Self::from_bits_truncate(value);
+    fn format(&self, flag: Self, display: char) -> char {
+        if self.contains(flag) {
+            display
+        } else {
+            '-'
+        }
+    }
+
+    pub fn read(&self) -> u8 {
+        let _span = tracing::span!(tracing::Level::INFO, "status").entered();
+        tracing::trace!("{}", self);
+        self.bits()
     }
 }
 
@@ -140,6 +180,12 @@ impl Default for ObjectAttributeAddress {
     }
 }
 
+impl ObjectAttributeAddress {
+    pub fn update(&mut self, data: u8) {
+        self.value = data;
+    }
+}
+
 /// https://www.nesdev.org/wiki/PPU_registers#OAMDATA
 pub struct ObjectAttributeData {
     pub value: u8,
@@ -151,6 +197,16 @@ impl Default for ObjectAttributeData {
     }
 }
 
+impl ObjectAttributeData {
+    pub fn read(&self) -> u8 {
+        self.value
+    }
+
+    pub fn update(&mut self, data: u8) {
+        self.value = data;
+    }
+}
+
 /// https://www.nesdev.org/wiki/PPU_registers#PPUSCROLL
 pub struct Scroll {
     pub value: u8,
@@ -159,6 +215,12 @@ pub struct Scroll {
 impl Default for Scroll {
     fn default() -> Self {
         Self { value: 0 }
+    }
+}
+
+impl Scroll {
+    pub fn update(&mut self, data: u8) {
+        self.value = data;
     }
 }
 
@@ -186,7 +248,7 @@ impl Address {
         }
     }
 
-    fn update(&mut self, data: u8) {
+    pub fn update(&mut self, data: u8) {
         let mut bytes = u16::to_be_bytes(self.value);
         if self.latch_high {
             bytes[0] = data;
@@ -219,5 +281,11 @@ pub struct ObjectAttributeDirectMemoryAccess {
 impl Default for ObjectAttributeDirectMemoryAccess {
     fn default() -> Self {
         Self { value: 0 }
+    }
+}
+
+impl ObjectAttributeDirectMemoryAccess {
+    pub fn update(&mut self, data: u8) {
+        self.value = data;
     }
 }

@@ -120,12 +120,16 @@ impl Memory for Bus {
             PROGRAM_ROM_START..=PROGRAM_ROM_END => self.read_program_rom(address),
 
             _ => {
-                if let Some(mutability) = crate::ppu::registers::get_mutability(address) {
+                if let Some((register, mutability)) = crate::ppu::registers::get_register(address) {
                     if mutability.readable() {
-                        tracing::trace!("PPU register read at ${:04X}", address);
-                        return self.ppu.read_data();
+                        tracing::trace!("PPU register {:?} read at ${:04X}", register, address);
+                        return self.ppu.read_register(register);
                     } else {
-                        tracing::error!("reading write-only PPU register ${:04X}", address);
+                        tracing::error!(
+                            "reading write-only PPU register {:?} at ${:04X}",
+                            register,
+                            address
+                        );
                         panic!()
                     }
                 }
@@ -148,16 +152,23 @@ impl Memory for Bus {
             ),
 
             _ => {
-                if let Some(mutability) = crate::ppu::registers::get_mutability(address) {
+                if let Some((register, mutability)) = crate::ppu::registers::get_register(address) {
                     if mutability.writable() {
-                        tracing::warn!(
-                            "unimplemented PPU register write at ${:04X}: ${:02X}",
+                        tracing::trace!(
+                            "PPU register {:?} write at ${:04X}: ${:02X}",
+                            register,
                             address,
                             data
                         );
-                        return; // TODO: right call
+
+                        self.ppu.write_register(register, data);
+                        return;
                     } else {
-                        tracing::error!("writing read-only PPU register ${:04X}", address);
+                        tracing::error!(
+                            "writing read-only PPU register {:?} at ${:04X}",
+                            register,
+                            address
+                        );
                         panic!()
                     }
                 }
