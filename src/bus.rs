@@ -1,10 +1,10 @@
 use crate::cartridge::Cartridge;
-use crate::ppu::Ppu;
+use crate::ppu::{self, *};
+use std::ops::RangeInclusive;
 
 pub const CPU_RAM_SIZE: usize = 2048;
-
-pub const PROGRAM_ROM_START: u16 = 0x8000;
-const PROGRAM_ROM_END: u16 = 0xFFFF;
+const CPU_RAM_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
+pub const PROGRAM_ROM_RANGE: RangeInclusive<u16> = 0x8000..=0xFFFF;
 
 pub trait Clock {
     const MULTIPLIER: u64 = 1;
@@ -48,9 +48,6 @@ pub struct Bus {
 }
 
 impl Bus {
-    const CPU_RAM_START: u16 = 0x0000;
-    const CPU_RAM_MIRROR_END: u16 = 0x1FFF;
-
     fn from_cart(cart: Cartridge) -> Bus {
         let span = tracing::span!(tracing::Level::INFO, "bus");
         tracing::info!("succesfully initialized");
@@ -73,6 +70,15 @@ impl Bus {
         Self::from_cart(cartridge)
     }
 
+    const fn to_cpu_ram_address(address: u16) -> usize {
+        // Addressing is 11 bits, so we need to mask the top 5 off
+        (address & 0b0000_0111_1111_1111) as usize
+    }
+
+    pub fn poll_nmi(&self) -> bool {
+        self.ppu.poll_nmi()
+    }
+
     /// Generate a dummy bus, used for tests
     #[allow(dead_code)]
     pub fn new_dummy(data: Vec<u8>) -> Self {
@@ -83,113 +89,80 @@ impl Bus {
 
         Self::from_cart(cartridge)
     }
-
-    fn read_program_rom(&self, address: u16) -> u8 {
-        let mut addr = address - PROGRAM_ROM_START;
-        if self.cartridge.program_rom.len() == 0x4000 && addr >= 0x4000 {
-            // Mirror, if required
-            addr %= 0x4000;
-        }
-        tracing::trace!("reading program ROM at ${:04X}", addr);
-        self.cartridge.program_rom[addr as usize]
-    }
-
-    const fn to_cpu_ram_address(address: u16) -> usize {
-        // Addressing is 11 bits, so we need to mask the top 5 off
-        (address & 0b0000_0111_1111_1111) as usize
-    }
-
-    fn read_cpu_ram(&self, address: u16) -> u8 {
-        let addr = Self::to_cpu_ram_address(address);
-        tracing::trace!("reading CPU RAM at ${:04X}", addr);
-        self.cpu_ram[addr]
-    }
-
-    fn write_cpu_ram(&mut self, address: u16, data: u8) {
-        let addr = Self::to_cpu_ram_address(address);
-        tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", addr, data);
-        self.cpu_ram[addr] = data;
-    }
-
-    pub fn poll_nmi(&self) -> bool {
-        self.ppu.poll_nmi()
-    }
 }
 
 impl Memory for Bus {
     #[tracing::instrument(skip(self, address), parent = &self.span, level = tracing::Level::TRACE)]
     fn read_byte(&mut self, address: u16) -> u8 {
-        match address {
-            Self::CPU_RAM_START..=Self::CPU_RAM_MIRROR_END => self.read_cpu_ram(address),
-            PROGRAM_ROM_START..=PROGRAM_ROM_END => self.read_program_rom(address),
-
-            _ => {
-                if let Some((register, mutability)) = crate::ppu::registers::get_register(address) {
-                    if mutability.readable() {
-                        tracing::trace!("PPU register {:?} read at ${:04X}", register, address);
-                        return self.ppu.read_register(register);
-                    } else {
-                        tracing::error!(
-                            "reading write-only PPU register {:?} at ${:04X}",
-                            register,
-                            address
-                        );
-                        panic!()
-                    }
-                }
-
-                tracing::warn!("unimplemented read at ${:04X}", address);
-                0
+        if PROGRAM_ROM_RANGE.contains(&address) {
+            let addr = (address - PROGRAM_ROM_RANGE.start()) % 0x4000;
+            let result = self.cartridge.program_rom[addr as usize];
+            tracing::trace!("program ROM read at ${:04X}: ${:02X}", addr, result);
+            return result;
+        } else if CPU_RAM_RANGE.contains(&address) {
+            let addr = Self::to_cpu_ram_address(address);
+            let result = self.cpu_ram[addr];
+            tracing::trace!("CPU RAM read at ${:04X}: ${:02X}", addr, result);
+            return result;
+        } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
+            if mutability.readable() {
+                tracing::trace!("PPU register {:?} read at ${:04X}", register, address);
+                return self.ppu.read_register(register);
+            } else {
+                tracing::error!(
+                    "reading write-only PPU register {:?} at ${:04X}",
+                    register,
+                    address
+                );
+                panic!()
             }
+        } else {
+            tracing::error!("unimplemented read at ${:04X}", address);
+            panic!()
         }
     }
 
     #[tracing::instrument(skip(self, address, data), parent = &self.span)]
     fn write_byte(&mut self, address: u16, data: u8) {
-        match address {
-            Self::CPU_RAM_START..=Self::CPU_RAM_MIRROR_END => self.write_cpu_ram(address, data),
+        if CPU_RAM_RANGE.contains(&address) {
+            let addr = Self::to_cpu_ram_address(address);
+            tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", addr, data);
+            self.cpu_ram[addr] = data;
+        } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
+            if mutability.writable() {
+                tracing::trace!(
+                    "PPU register {:?} write at ${:04X}: ${:02X}",
+                    register,
+                    address,
+                    data
+                );
 
-            PROGRAM_ROM_START..=PROGRAM_ROM_END => tracing::warn!(
-                "attempted to write to program ROM at ${:04X}: ${:02X}",
+                // TODO: this isn't the prettiest, but we need special behavior from the bus for DMA
+                if register == &ppu::registers::Register::ObjectAttributeDirectMemoryAccess {
+                    self.ppu
+                        .oam
+                        .write_dma(data, |range| self.cpu_ram[range].try_into().unwrap());
+                } else {
+                    self.ppu.write_register(register, data);
+                }
+            } else {
+                tracing::error!(
+                    "writing read-only PPU register {:?} at ${:04X}",
+                    register,
+                    address
+                );
+                panic!()
+            }
+        } else if PROGRAM_ROM_RANGE.contains(&address) {
+            tracing::error!(
+                "writing read-only program ROM at ${:04X}: ${:02X}",
                 address,
                 data
-            ),
-
-            _ => {
-                if let Some((register, mutability)) = crate::ppu::registers::get_register(address) {
-                    if mutability.writable() {
-                        tracing::trace!(
-                            "PPU register {:?} write at ${:04X}: ${:02X}",
-                            register,
-                            address,
-                            data
-                        );
-
-                        // TODO: this isn't the prettiest
-                        if register
-                            == &crate::ppu::registers::Register::ObjectAttributeDirectMemoryAccess
-                        {
-                            // $XX -> $XX00
-                            let begin = ((data * 16) * 16) as usize;
-                            let end = begin + crate::ppu::Ppu::OBJECT_ATTRIBUTE_TABLE_SIZE;
-                            self.ppu.object_attribute_direct_memory_access(&self.cpu_ram[begin..end])
-                        } else {
-                            self.ppu.write_register(register, data);
-                        }
-
-                        return;
-                    } else {
-                        tracing::error!(
-                            "writing read-only PPU register {:?} at ${:04X}",
-                            register,
-                            address
-                        );
-                        panic!()
-                    }
-                }
-
-                tracing::warn!("unimplemented write at ${:04X}: ${:02X}", address, data);
-            }
+            );
+            panic!()
+        } else {
+            tracing::error!("unimplemented write at ${:04X}: ${:02X}", address, data);
+            panic!()
         }
     }
 }

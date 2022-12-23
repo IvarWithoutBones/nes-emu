@@ -1,6 +1,8 @@
+mod object_attribute;
 pub(crate) mod registers;
 
 use crate::cartridge::Mirroring;
+use object_attribute::ObjectAttributeMemory;
 use registers::Register;
 use std::ops::RangeInclusive;
 
@@ -14,13 +16,12 @@ pub struct Ppu {
     nmi_output: bool,
 
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
-    object_attribute_table: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
+    pub oam: ObjectAttributeMemory,
 
     control: registers::Control,
     mask: registers::Mask,
     status: registers::Status,
-    object_attribute_address: registers::ObjectAttributeAddress,
     scroll: registers::Scroll,
     address: registers::Address,
     data: registers::Data,
@@ -32,7 +33,6 @@ impl Ppu {
     const PALETTE_RAM_RANGE: RangeInclusive<u16> = 0x3F00..=0x3FFF;
 
     const PALETTE_TABLE_SIZE: usize = 32;
-    pub const OBJECT_ATTRIBUTE_TABLE_SIZE: usize = 0x100;
     const VRAM_SIZE: usize = 0x800;
 
     pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
@@ -45,13 +45,12 @@ impl Ppu {
             nmi_output: false,
 
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
-            object_attribute_table: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
             vram: [0; Self::VRAM_SIZE],
+            oam: ObjectAttributeMemory::default(),
 
             control: registers::Control::default(),
             mask: registers::Mask::default(),
             status: registers::Status::default(),
-            object_attribute_address: registers::ObjectAttributeAddress::default(),
             scroll: registers::Scroll::default(),
             address: registers::Address::default(),
             data: registers::Data::default(),
@@ -82,36 +81,6 @@ impl Ppu {
         self.address
             .increment(self.control.vram_address_increment());
         tracing::trace!("address register increment: ${:02X}", self.address.value)
-    }
-
-    /// Helper for reading from OAMDATA
-    #[tracing::instrument(skip(self), parent = &self.span)]
-    fn read_object_attribute(&mut self) -> u8 {
-        // TODO: do we increment OAMADDR when not in vertical or forced blanking?
-        // TODO: do we index with the OAMDATA value in any scenario?
-        let index = self.object_attribute_address.value as usize;
-        let result = self.object_attribute_table[index];
-        tracing::trace!("object attribute read at ${:02X}: ${:02X}", index, result);
-        result
-    }
-
-    /// Helper for writing to OAMDATA
-    #[tracing::instrument(skip(self), parent = &self.span)]
-    fn write_object_attribute(&mut self, data: u8) {
-        // TODO: do we index with the OAMDATA value in any scenario?
-        let index = self.object_attribute_address.value as usize;
-        tracing::trace!("object attribute write at ${:02X}: ${:02X}", index, data);
-        self.object_attribute_table[index] = data;
-        self.object_attribute_address.increment();
-    }
-
-    /// DMA to copy a slice of bytes from CPU RAM to OAM
-    pub fn object_attribute_direct_memory_access(&mut self, data: &[u8]) {
-        let starting_point = self.object_attribute_address.value as usize;
-        for (mut index, byte) in data.iter().enumerate() {
-            index = index.wrapping_add(starting_point);
-            self.object_attribute_table[index] = *byte;
-        }
     }
 
     fn read_status(&mut self) -> u8 {
@@ -183,7 +152,7 @@ impl Ppu {
     pub fn read_register(&mut self, register: &Register) -> u8 {
         let result = match register {
             Register::Status => self.read_status(),
-            Register::ObjectAttributeData => self.read_object_attribute(),
+            Register::ObjectAttributeData => self.oam.read_data(),
             Register::Data => self.read_data(),
             _ => {
                 tracing::error!("unimplemented register {:?} read", register);
@@ -199,14 +168,14 @@ impl Ppu {
         match register {
             Register::Control => self.write_control(data),
             Register::Mask => self.mask.update(data),
-            Register::ObjectAttributeAddress => self.object_attribute_address.update(data),
-            Register::ObjectAttributeData => self.write_object_attribute(data),
+            Register::ObjectAttributeAddress => self.oam.write_address(data),
+            Register::ObjectAttributeData => self.oam.write_data(data),
             Register::Scroll => self.scroll.update(data),
             Register::Address => self.address.update(data),
             Register::Data => self.write_data(data),
             Register::ObjectAttributeDirectMemoryAccess => {
                 tracing::error!(
-                    "invalid addressing of register {:?} write (${:02X})",
+                    "invalid addressing for register {:?}, write of ${:02X}",
                     register,
                     data
                 );

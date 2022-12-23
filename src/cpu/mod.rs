@@ -2,7 +2,7 @@ mod addressing_mode;
 mod assembler;
 mod instructions;
 
-use crate::bus::{Bus, Clock, Memory, CPU_RAM_SIZE, PROGRAM_ROM_START};
+use crate::bus::{Bus, Clock, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
 use bitflags::bitflags;
 use instructions::Instruction;
 use std::fmt;
@@ -64,7 +64,7 @@ impl Cpu {
 
     pub fn new(bus: Bus) -> Cpu {
         Cpu {
-            program_counter: PROGRAM_ROM_START,
+            program_counter: *PROGRAM_ROM_RANGE.start(),
             stack_pointer: Cpu::STACK_RESET,
             flags: CpuFlags::default(),
             accumulator: 0,
@@ -314,7 +314,7 @@ mod test {
         assert_eq!(cpu.accumulator, 0);
         assert_eq!(cpu.register_x, 0);
         assert_eq!(cpu.register_y, 0);
-        assert_eq!(cpu.program_counter, PROGRAM_ROM_START);
+        assert_eq!(cpu.program_counter, *PROGRAM_ROM_RANGE.start());
         assert_eq!(cpu.flags, CpuFlags::default());
     });
 

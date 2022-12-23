@@ -181,27 +181,6 @@ impl Status {
     }
 }
 
-/// https://www.nesdev.org/wiki/PPU_registers#OAMADDR
-pub struct ObjectAttributeAddress {
-    pub value: u8,
-}
-
-impl Default for ObjectAttributeAddress {
-    fn default() -> Self {
-        Self { value: 0 }
-    }
-}
-
-impl ObjectAttributeAddress {
-    pub fn update(&mut self, data: u8) {
-        self.value = data;
-    }
-
-    pub fn increment(&mut self) {
-        self.value = self.value.wrapping_add(1);
-    }
-}
-
 /// https://www.nesdev.org/wiki/PPU_registers#PPUSCROLL
 pub struct Scroll {
     horizontal: u8,
