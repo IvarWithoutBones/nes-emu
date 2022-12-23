@@ -15,13 +15,6 @@ impl Default for Address {
 }
 
 impl Address {
-    fn mirror(&mut self) {
-        const HIGHEST_VALID_ADDR: u16 = 0x4000;
-        if self.value >= HIGHEST_VALID_ADDR {
-            self.value = self.value % HIGHEST_VALID_ADDR;
-        }
-    }
-
     pub fn update(&mut self, data: u8) {
         let mut bytes = u16::to_be_bytes(self.value);
         if self.latch_high {
@@ -42,5 +35,12 @@ impl Address {
 
     pub fn reset_latch(&mut self) {
         self.latch_high = true;
+    }
+
+    fn mirror(&mut self) {
+        const HIGHEST_VALID_ADDR: u16 = 0x4000;
+        if self.value >= HIGHEST_VALID_ADDR {
+            self.value = self.value % HIGHEST_VALID_ADDR;
+        }
     }
 }

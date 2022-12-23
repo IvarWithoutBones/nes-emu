@@ -1,7 +1,5 @@
-use crate::bus::{Clock, Memory};
+use crate::bus::{Clock, Memory, CycleCount};
 use crate::cpu::{addressing_mode::AdressingMode, Cpu, CpuFlags};
-
-pub type CycleCount = u64;
 
 /// A single instruction, with addressing mode.
 struct Opcode {

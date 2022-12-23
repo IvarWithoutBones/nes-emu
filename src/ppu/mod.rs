@@ -1,19 +1,19 @@
 mod object_attribute;
 pub(crate) mod registers;
 
+use super::bus::{Clock, CycleCount};
 use crate::cartridge::Mirroring;
 use object_attribute::ObjectAttributeMemory;
 use registers::Register;
 use std::ops::RangeInclusive;
+
+type ScanlineCount = u16;
 
 /// https://www.nesdev.org/wiki/PPU
 pub struct Ppu {
     span: tracing::Span,
     mirroring: Mirroring,
     character_rom: Vec<u8>,
-
-    nmi_occured: bool,
-    nmi_output: bool,
 
     data_buffer: u8,
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
@@ -25,6 +25,10 @@ pub struct Ppu {
     status: registers::Status,
     scroll: registers::Scroll,
     address: registers::Address,
+
+    cycles: CycleCount,
+    scanline: ScanlineCount,
+    trigger_nmi: bool,
 }
 
 impl Ppu {
@@ -41,9 +45,6 @@ impl Ppu {
             mirroring,
             character_rom,
 
-            nmi_occured: false,
-            nmi_output: false,
-
             data_buffer: 0,
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
             vram: [0; Self::VRAM_SIZE],
@@ -54,17 +55,15 @@ impl Ppu {
             status: registers::Status::default(),
             scroll: registers::Scroll::default(),
             address: registers::Address::default(),
+
+            cycles: 0,
+            scanline: 0,
+            trigger_nmi: false,
         }
     }
 
-    fn update_data_buffer(&mut self, value: u8) -> u8 {
-        let result = self.data_buffer;
-        self.data_buffer = value;
-        result
-    }
-
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-    fn mirror_nametable_addr(&self, addr: u16) -> u16 {
+    const fn mirror_nametable(&self, addr: u16) -> u16 {
         // TODO: no idea how this works
         let mirrored_vram = addr & 0b10111111111111; // mirror down 0x3000-0x3eff to 0x2000 - 0x2eff
         let vram_index = mirrored_vram - 0x2000; // to vram vector
@@ -78,28 +77,42 @@ impl Ppu {
         }
     }
 
-    fn mirror_palette_table(&self, addr: u16) -> usize {
+    const fn mirror_palette_table(&self, addr: u16) -> usize {
         (addr % Self::PALETTE_TABLE_SIZE as u16) as usize
+    }
+
+    fn update_data_buffer(&mut self, value: u8) -> u8 {
+        let result = self.data_buffer;
+        self.data_buffer = value;
+        result
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     fn increment_vram_address(&mut self) {
-        self.address
-            .increment(self.control.vram_address_increment());
-        tracing::trace!("address register increment: ${:02X}", self.address.value)
+        let incr = self.control.vram_address_increment();
+        self.address.increment(incr);
+        tracing::trace!(
+            "address register incremented to ${:02X}",
+            self.address.value
+        )
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     fn read_status(&mut self) -> u8 {
-        self.nmi_occured = false;
+        let result = self.status.read();
+        tracing::trace!("returning status register: {}", self.status);
+        self.status.reset_vblank();
         self.address.reset_latch();
-        self.status.read()
+        self.scroll.reset_latch();
+        result
     }
 
     fn write_control(&mut self, data: u8) {
+        let nmi_before = self.control.nmi_at_vblank();
         self.control.update(data);
-        self.nmi_output = self
-            .control
-            .contains(registers::Control::NonMaskableInterruptAtVBlank);
+        if !nmi_before && self.status.in_vblank() && self.control.nmi_at_vblank() {
+            self.trigger_nmi = true;
+        }
     }
 
     /// Helper for reading from PPUDATA
@@ -110,16 +123,16 @@ impl Ppu {
 
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             let result = self.character_rom[addr as usize];
-            tracing::trace!("pattern table read at ${:04X}: ${:02X}", addr, result);
+            tracing::info!("pattern table read at ${:04X}: ${:02X}", addr, result);
             return self.update_data_buffer(result);
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
-            let result = self.vram[self.mirror_nametable_addr(addr) as usize];
-            tracing::trace!("nametable read at ${:04X}: ${:02X}", addr, result);
+            let result = self.vram[self.mirror_nametable(addr) as usize];
+            tracing::info!("nametable read at ${:04X}: ${:02X}", addr, result);
             return self.update_data_buffer(result);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             // TODO: This should set the data buffer to the nametable "below" the pattern table
             let result = self.palette_table[self.mirror_palette_table(addr)];
-            tracing::trace!("palette RAM read at ${:04X}: ${:02X}", addr, result);
+            tracing::info!("palette RAM read at ${:04X}: ${:02X}", addr, result);
             return result;
         } else {
             tracing::error!("invalid data read at ${:04X}", addr);
@@ -128,7 +141,7 @@ impl Ppu {
     }
 
     /// Helper for writing with PPUDATA
-    #[tracing::instrument(skip(self), parent = &self.span)]
+    #[tracing::instrument(skip(self, data), parent = &self.span)]
     fn write_data(&mut self, data: u8) {
         let addr = self.address.value;
 
@@ -139,15 +152,15 @@ impl Ppu {
                 data
             );
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
-            let vram_index = self.mirror_nametable_addr(addr) as usize;
-            tracing::trace!("nametable write at ${:04X}: ${:02X}", vram_index, data);
+            let vram_index = self.mirror_nametable(addr) as usize;
+            tracing::info!("nametable write at ${:04X}: ${:02X}", vram_index, data);
             self.vram[vram_index] = data;
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             let palette_index = self.mirror_palette_table(addr);
-            tracing::trace!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
+            tracing::info!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
             self.palette_table[palette_index] = data;
         } else {
-            tracing::error!("invalid data write at ${:04X}: ${:02X}", addr, data);
+            tracing::info!("invalid data write at ${:04X}: ${:02X}", addr, data);
             panic!()
         }
 
@@ -161,11 +174,11 @@ impl Ppu {
             Register::ObjectAttributeData => self.oam.read_data(),
             Register::Data => self.read_data(),
             _ => {
-                tracing::error!("unimplemented register {:?} read", register);
+                tracing::error!("unimplemented register {} read", register);
                 panic!()
             }
         };
-        tracing::trace!("register {:?} read: ${:02X}", register, result);
+        tracing::trace!("register {} read: ${:02X}", register, result);
         result
     }
 
@@ -181,25 +194,65 @@ impl Ppu {
             Register::Data => self.write_data(data),
             Register::ObjectAttributeDirectMemoryAccess => {
                 tracing::error!(
-                    "invalid addressing for register {:?}, write of ${:02X}",
+                    "invalid addressing for register {}, write of ${:02X}",
                     register,
                     data
                 );
                 panic!()
             }
             _ => {
-                tracing::error!(
-                    "unimplemented register {:?} write of ${:02X}",
-                    register,
-                    data
-                );
+                tracing::error!("unimplemented register {} write of ${:02X}", register, data);
                 panic!()
             }
         }
-        tracing::trace!("register {:?} write: ${:02X}", register, data);
+        tracing::trace!("register {} write: ${:02X}", register, data);
     }
 
-    pub fn poll_nmi(&self) -> bool {
-        self.nmi_occured && self.nmi_output
+    pub fn poll_nmi(&mut self) -> bool {
+        let result = self.trigger_nmi;
+        if result {
+            self.trigger_nmi = false;
+        }
+        result
+    }
+}
+
+impl Clock for Ppu {
+    const MULTIPLIER: usize = 3;
+
+    #[tracing::instrument(skip(self, cycles), parent = &self.span)]
+    fn tick_internal(&mut self, cycles: CycleCount) {
+        const CYCLES_PER_SCANLINE: CycleCount = 341;
+        const SCANLINES_PER_FRAME: ScanlineCount = 261;
+        const VBLANK_SCANLINE: ScanlineCount = 241;
+
+        self.cycles += cycles;
+        if self.cycles >= CYCLES_PER_SCANLINE {
+            self.set_cycles(self.cycles - CYCLES_PER_SCANLINE);
+            self.scanline += 1;
+
+            if self.scanline == VBLANK_SCANLINE {
+                self.status.set_vblank();
+                tracing::info!("setting vblank: {}", self.status);
+                if self.control.nmi_at_vblank() {
+                    self.trigger_nmi = true;
+                }
+            }
+
+            if self.scanline > SCANLINES_PER_FRAME {
+                // Drawn everything, starting all over again
+                self.scanline = 0;
+                self.trigger_nmi = false;
+                self.status.reset_vblank();
+            }
+        }
+    }
+
+    fn get_cycles(&self) -> CycleCount {
+        self.cycles
+    }
+
+    fn set_cycles(&mut self, cycles: CycleCount) {
+        self.cycles = cycles;
     }
 }

@@ -2,7 +2,7 @@ mod addressing_mode;
 mod assembler;
 mod instructions;
 
-use crate::bus::{Bus, Clock, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
+use crate::bus::{Bus, Clock, CycleCount, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
 use bitflags::bitflags;
 use instructions::Instruction;
 use std::fmt;
@@ -43,6 +43,7 @@ impl Default for CpuFlags {
 
 /// See https://www.nesdev.org/wiki/CPU
 pub struct Cpu {
+    span: tracing::Span,
     pub accumulator: u8,
     pub register_x: u8,
     pub register_y: u8,
@@ -50,20 +51,19 @@ pub struct Cpu {
     pub stack_pointer: u8,
     pub flags: CpuFlags,
     pub bus: Bus,
-    nmi: bool,
 }
 
 impl Cpu {
-    const SPAN_NAME: &'static str = "cpu";
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
-    const RESET_CYCLES: u64 = 7;
+    const RESET_CYCLES: usize = 7;
 
     const NMI_VECTOR: u16 = 0xFFFA;
     const RESET_VECTOR: u16 = 0xFFFC;
 
     pub fn new(bus: Bus) -> Cpu {
         Cpu {
+            span: tracing::span!(tracing::Level::INFO, "cpu"),
             program_counter: *PROGRAM_ROM_RANGE.start(),
             stack_pointer: Cpu::STACK_RESET,
             flags: CpuFlags::default(),
@@ -71,12 +71,11 @@ impl Cpu {
             register_x: 0,
             register_y: 0,
             bus,
-            nmi: false,
         }
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn reset(&mut self) {
-        let _span = tracing::span!(tracing::Level::INFO, Cpu::SPAN_NAME).entered();
         self.set_cycles(Cpu::RESET_CYCLES);
         self.flags = CpuFlags::default();
         self.stack_pointer = Cpu::STACK_RESET;
@@ -129,14 +128,26 @@ impl Cpu {
         self.flags.set(CpuFlags::Zero, value == 0);
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn non_maskable_interrupt(&mut self) {
-        self.push_byte(self.flags.bits());
-        self.push_word(self.program_counter); // TODO: Any increments?
+        tracing::info!("NMI triggered");
+        let mut flags = self.flags.clone();
+        flags.remove(CpuFlags::Break);
+        flags.insert(CpuFlags::Break2);
+
+        self.push_word(self.program_counter); // TODO: any increment?
+        self.push_byte(flags.bits());
+
+        self.flags.insert(CpuFlags::InterruptsDisabled);
         self.program_counter = self.read_word(Self::NMI_VECTOR);
+        self.tick(2);
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn step(&mut self) -> Option<Box<CpuState>> {
-        let _span = tracing::span!(tracing::Level::INFO, Cpu::SPAN_NAME).entered();
+        if self.bus.ppu.poll_nmi() {
+            self.non_maskable_interrupt();
+        }
 
         let opcode = self.read_byte(self.program_counter);
         let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
@@ -146,11 +157,6 @@ impl Cpu {
             )
             .as_str(),
         );
-
-        if self.bus.poll_nmi() {
-            self.nmi = true;
-            self.non_maskable_interrupt();
-        }
 
         let state = CpuState {
             instruction: instr.format(self, mode),
@@ -162,12 +168,6 @@ impl Cpu {
             status: self.flags.clone(),
             memory: self.bus.cpu_ram,
         };
-
-        if self.nmi {
-            self.nmi = false;
-            tracing::debug!("{}  {}", self, state.instruction);
-            return Some(Box::new(state));
-        }
 
         if instr.name == "BRK" {
             // TODO: this is a hack
@@ -183,7 +183,7 @@ impl Cpu {
 
         tracing::debug!("{}  {}", self, state.instruction);
 
-        self.tick(*cycles as u64);
+        self.tick(*cycles as usize);
         Some(Box::new(state))
     }
 }
@@ -199,15 +199,15 @@ impl Memory for Cpu {
 }
 
 impl Clock for Cpu {
-    fn tick_internal(&mut self, cycles: u64) {
+    fn tick_internal(&mut self, cycles: CycleCount) {
         self.bus.tick_internal(cycles);
     }
 
-    fn get_cycles(&self) -> u64 {
+    fn get_cycles(&self) -> CycleCount {
         self.bus.get_cycles()
     }
 
-    fn set_cycles(&mut self, cycles: u64) {
+    fn set_cycles(&mut self, cycles: CycleCount) {
         self.bus.set_cycles(cycles);
     }
 }

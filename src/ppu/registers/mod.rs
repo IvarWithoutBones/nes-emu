@@ -83,3 +83,21 @@ pub fn get_register(address: u16) -> Option<(&'static Register, &'static Mutabil
         }
     })
 }
+
+impl std::fmt::Display for Register {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Control => write!(f, "control"),
+            Self::Mask => write!(f, "mask"),
+            Self::Status => write!(f, "status"),
+            Self::ObjectAttributeAddress => write!(f, "object_attribute_address"),
+            Self::ObjectAttributeData => write!(f, "object_attribute_data"),
+            Self::Scroll => write!(f, "scroll"),
+            Self::Address => write!(f, "address"),
+            Self::Data => write!(f, "data"),
+            Self::ObjectAttributeDirectMemoryAccess => {
+                write!(f, "object_attribute_direct_memory_access")
+            }
+        }
+    }
+}

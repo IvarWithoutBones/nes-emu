@@ -6,14 +6,16 @@ pub const CPU_RAM_SIZE: usize = 2048;
 const CPU_RAM_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
 pub const PROGRAM_ROM_RANGE: RangeInclusive<u16> = 0x8000..=0xFFFF;
 
+pub type CycleCount = usize;
+
 pub trait Clock {
-    const MULTIPLIER: u64 = 1;
+    const MULTIPLIER: usize = 1;
 
-    fn tick_internal(&mut self, cycles: u64);
-    fn get_cycles(&self) -> u64;
-    fn set_cycles(&mut self, cycles: u64);
+    fn tick_internal(&mut self, cycles: CycleCount);
+    fn get_cycles(&self) -> CycleCount;
+    fn set_cycles(&mut self, cycles: CycleCount);
 
-    fn tick(&mut self, cycles: u64) {
+    fn tick(&mut self, cycles: CycleCount) {
         self.tick_internal(cycles * Self::MULTIPLIER);
     }
 
@@ -43,7 +45,7 @@ pub struct Bus {
     span: tracing::Span,
     pub cartridge: Cartridge,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
-    pub cycles: u64,
+    pub cycles: CycleCount,
     pub ppu: Ppu,
 }
 
@@ -75,10 +77,6 @@ impl Bus {
         (address & 0b0000_0111_1111_1111) as usize
     }
 
-    pub fn poll_nmi(&self) -> bool {
-        self.ppu.poll_nmi()
-    }
-
     /// Generate a dummy bus, used for tests
     #[allow(dead_code)]
     pub fn new_dummy(data: Vec<u8>) -> Self {
@@ -106,11 +104,11 @@ impl Memory for Bus {
             return result;
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.readable() {
-                tracing::trace!("PPU register {:?} read at ${:04X}", register, address);
+                tracing::trace!("PPU register {} read at ${:04X}", register, address);
                 return self.ppu.read_register(register);
             } else {
                 tracing::error!(
-                    "reading write-only PPU register {:?} at ${:04X}",
+                    "reading write-only PPU register {} at ${:04X}",
                     register,
                     address
                 );
@@ -118,7 +116,8 @@ impl Memory for Bus {
             }
         } else {
             tracing::error!("unimplemented read at ${:04X}", address);
-            panic!()
+            0
+            // panic!()
         }
     }
 
@@ -131,7 +130,7 @@ impl Memory for Bus {
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.writable() {
                 tracing::trace!(
-                    "PPU register {:?} write at ${:04X}: ${:02X}",
+                    "PPU register {} write at ${:04X}: ${:02X}",
                     register,
                     address,
                     data
@@ -147,7 +146,7 @@ impl Memory for Bus {
                 }
             } else {
                 tracing::error!(
-                    "writing read-only PPU register {:?} at ${:04X}",
+                    "writing read-only PPU register {} at ${:04X}",
                     register,
                     address
                 );
@@ -162,22 +161,22 @@ impl Memory for Bus {
             panic!()
         } else {
             tracing::error!("unimplemented write at ${:04X}: ${:02X}", address, data);
-            panic!()
+            // panic!()
         }
     }
 }
 
-// TODO: tracing?
 impl Clock for Bus {
-    fn tick_internal(&mut self, cycles: u64) {
+    fn tick_internal(&mut self, cycles: CycleCount) {
         self.cycles += cycles;
+        self.ppu.tick(cycles);
     }
 
-    fn get_cycles(&self) -> u64 {
+    fn get_cycles(&self) -> CycleCount {
         self.cycles
     }
 
-    fn set_cycles(&mut self, cycles: u64) {
+    fn set_cycles(&mut self, cycles: CycleCount) {
         self.cycles = cycles;
     }
 }

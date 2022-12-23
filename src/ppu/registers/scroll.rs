@@ -25,5 +25,8 @@ impl Scroll {
 
         self.horizontal_latch = !self.horizontal_latch;
     }
-}
 
+    pub fn reset_latch(&mut self) {
+        self.horizontal_latch = true;
+    }
+}

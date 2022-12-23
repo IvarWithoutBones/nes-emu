@@ -39,18 +39,19 @@ impl Default for Control {
 }
 
 impl Control {
-    pub fn vram_address_increment(&self) -> u8 {
-        const VRAM_ADDR_INCREMENT_IF_FLAG: u8 = 32;
-        const VRAM_ADDR_INCREMENT_NO_FLAG: u8 = 1;
+    pub fn update(&mut self, value: u8) {
+        Self::from_bits_truncate(value);
+    }
 
+    pub fn vram_address_increment(&self) -> u8 {
         if self.contains(Self::VramAdressIncrement) {
-            VRAM_ADDR_INCREMENT_IF_FLAG
+            32
         } else {
-            VRAM_ADDR_INCREMENT_NO_FLAG
+            1
         }
     }
 
-    pub fn update(&mut self, value: u8) {
-        Self::from_bits_truncate(value);
+    pub fn nmi_at_vblank(&self) -> bool {
+        self.contains(Self::NonMaskableInterruptAtVBlank)
     }
 }

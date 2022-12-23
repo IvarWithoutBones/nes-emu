@@ -1,4 +1,4 @@
-use std::ops::RangeInclusive;
+use std::ops::Range;
 
 /// https://www.nesdev.org/wiki/PPU_OAM
 pub struct ObjectAttributeMemory {
@@ -10,7 +10,7 @@ pub struct ObjectAttributeMemory {
 impl Default for ObjectAttributeMemory {
     fn default() -> Self {
         Self {
-            span: tracing::span!(tracing::Level::INFO, "oam"),
+            span: tracing::span!(tracing::Level::INFO, "ppu:oam"),
             memory: [0; Self::MEMORY_SIZE],
             address: 0,
         }
@@ -40,18 +40,22 @@ impl ObjectAttributeMemory {
         result
     }
 
-    #[tracing::instrument(skip(self, addr, func), parent = &self.span)]
-    pub fn write_dma<F>(&mut self, addr: u8, func: F)
+    #[tracing::instrument(skip(self, addr, fetch_buf), parent = &self.span)]
+    pub fn write_dma<F>(&mut self, addr: u8, fetch_buf: F)
     where
-        F: FnOnce(RangeInclusive<usize>) -> [u8; Self::MEMORY_SIZE],
+        F: FnOnce(Range<usize>) -> [u8; Self::MEMORY_SIZE],
     {
         // Convert to a page index: $XX -> $XX00
-        let begin = ((addr * 16) * 16) as usize;
+        let begin = ((addr as u16) << 8) as usize;
         let end = begin + Self::MEMORY_SIZE;
-        tracing::trace!("DMA transfer at ${:02X}", self.address);
+        tracing::info!(
+            "DMA transfer from ${:04X}..=${:04X}, copying into ${:02X}",
+            begin,
+            end,
+            self.address
+        );
 
-        let buffer = func(begin..=end);
-        for byte in buffer {
+        for byte in fetch_buf(begin..end) {
             self.memory[self.address as usize] = byte;
             self.address = self.address.wrapping_add(1);
         }

@@ -51,6 +51,13 @@ fn main() {
     // CPU state communication
     let (cpu_state_sender, cpu_state_receiver) = channel();
     let (step_sender, step_receiver) = channel();
+
+    let cpu_state_sender = if args.without_gui {
+        None
+    } else {
+        Some(cpu_state_sender)
+    };
+
     let step_receiver = if args.without_gui {
         None
     } else {
@@ -65,7 +72,7 @@ fn main() {
 
         let mut index = 0;
         loop {
-            if index == 100 {
+            if index == 100000 {
                 break;
             }
 
@@ -85,10 +92,12 @@ fn main() {
             }
 
             if let Some(instr_state) = cpu.step() {
-                if cpu_state_sender.send(instr_state).is_err() {
-                    // GUI has died, so the CPU should too.
-                    break;
-                };
+                if let Some(ref cpu_state_sender) = cpu_state_sender {
+                    if cpu_state_sender.send(instr_state).is_err() {
+                        // GUI has died, so the CPU should too.
+                        break;
+                    };
+                }
             } else {
                 // Some sort of error occured, should communicate to the GUI in the future.
                 break;
