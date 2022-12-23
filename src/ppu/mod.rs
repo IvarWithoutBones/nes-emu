@@ -18,11 +18,9 @@ pub struct Ppu {
     mask: registers::Mask,
     status: registers::Status,
     object_attribute_address: registers::ObjectAttributeAddress,
-    // object_attribute_data: registers::ObjectAttributeData,
     scroll: registers::Scroll,
     address: registers::Address,
     data: registers::Data,
-    object_attribute_direct_memory_access: registers::ObjectAttributeDirectMemoryAccess,
 }
 
 impl Ppu {
@@ -31,7 +29,7 @@ impl Ppu {
     const PALETTE_RAM_RANGE: RangeInclusive<u16> = 0x3F00..=0x3FFF;
 
     const PALETTE_TABLE_SIZE: usize = 32;
-    const OBJECT_ATTRIBUTE_TABLE_SIZE: usize = 0x100;
+    pub const OBJECT_ATTRIBUTE_TABLE_SIZE: usize = 0x100;
     const VRAM_SIZE: usize = 0x800;
 
     pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
@@ -48,12 +46,9 @@ impl Ppu {
             mask: registers::Mask::default(),
             status: registers::Status::default(),
             object_attribute_address: registers::ObjectAttributeAddress::default(),
-            // object_attribute_data: registers::ObjectAttributeData::default(),
             scroll: registers::Scroll::default(),
             address: registers::Address::default(),
             data: registers::Data::default(),
-            object_attribute_direct_memory_access:
-                registers::ObjectAttributeDirectMemoryAccess::default(),
         }
     }
 
@@ -73,7 +68,7 @@ impl Ppu {
     }
 
     fn mirror_palette_table(&self, addr: u16) -> usize {
-        ((addr % Self::PALETTE_TABLE_SIZE as u16) - Self::PALETTE_RAM_RANGE.start()) as usize
+        (addr % Self::PALETTE_TABLE_SIZE as u16) as usize
     }
 
     fn increment_vram_address(&mut self) {
@@ -100,6 +95,15 @@ impl Ppu {
         tracing::trace!("object attribute write at ${:02X}: ${:02X}", index, data);
         self.object_attribute_table[index] = data;
         self.object_attribute_address.increment();
+    }
+
+    /// DMA to copy a slice of bytes from CPU RAM to OAM
+    pub fn object_attribute_direct_memory_access(&mut self, data: &[u8]) {
+        let starting_point = self.object_attribute_address.value as usize;
+        for (mut index, byte) in data.iter().enumerate() {
+            index = index.wrapping_add(starting_point);
+            self.object_attribute_table[index] = *byte;
+        }
     }
 
     /// Helper for reading from PPUDATA
@@ -180,7 +184,12 @@ impl Ppu {
             Register::Address => self.address.update(data),
             Register::Data => self.write_data(data),
             Register::ObjectAttributeDirectMemoryAccess => {
-                self.object_attribute_direct_memory_access.update(data)
+                tracing::error!(
+                    "invalid addressing of register {:?} write (${:02X})",
+                    register,
+                    data
+                );
+                panic!()
             }
             _ => {
                 tracing::error!(

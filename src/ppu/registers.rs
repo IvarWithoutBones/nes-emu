@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use std::ops::RangeInclusive;
 
 #[derive(Debug)]
 pub enum Mutability {
@@ -36,26 +37,35 @@ pub enum Register {
     ObjectAttributeDirectMemoryAccess,
 }
 
-const REGISTERS: [(u16, Register, Mutability); 9] = [
-    (0x2000, Register::Control, Mutability::Write),
-    (0x2001, Register::Mask, Mutability::Write),
-    (0x2002, Register::Status, Mutability::Read),
-    (0x2003, Register::ObjectAttributeAddress, Mutability::Write),
-    (0x2004, Register::ObjectAttributeData, Mutability::ReadWrite),
-    (0x2005, Register::Scroll, Mutability::Write),
-    (0x2006, Register::Address, Mutability::Write),
-    (0x2007, Register::Data, Mutability::ReadWrite),
-    (
-        0x4014,
-        Register::ObjectAttributeDirectMemoryAccess,
-        Mutability::Write,
-    ),
+const REGISTERS: [(u16, Register, Mutability); 8] = [
+    (0, Register::Control, Mutability::Write),
+    (1, Register::Mask, Mutability::Write),
+    (2, Register::Status, Mutability::Read),
+    (3, Register::ObjectAttributeAddress, Mutability::Write),
+    (4, Register::ObjectAttributeData, Mutability::ReadWrite),
+    (5, Register::Scroll, Mutability::Write),
+    (6, Register::Address, Mutability::Write),
+    (7, Register::Data, Mutability::ReadWrite),
 ];
 
 pub fn get_register(address: u16) -> Option<(&'static Register, &'static Mutability)> {
-    // TODO: consider mirroring
+    const REGISTERS_RANGE: RangeInclusive<u16> = 0x2000..=0x3FFF;
+    if !REGISTERS_RANGE.contains(&address) {
+        // TODO: Remove this when I/O registers are properly implemented
+        if address == 0x4014 {
+            return Some((
+                &Register::ObjectAttributeDirectMemoryAccess,
+                &Mutability::Write,
+            ));
+        } else {
+            return None;
+        }
+    }
+
+    // Registers are mirrored every 8 bytes
+    let mirrored = address % 8;
     REGISTERS.iter().find_map(|r| {
-        if r.0 == address {
+        if r.0 == mirrored {
             Some((&r.1, &r.2))
         } else {
             None
@@ -190,17 +200,6 @@ impl ObjectAttributeAddress {
     }
 }
 
-/// https://www.nesdev.org/wiki/PPU_registers#OAMDATA
-// pub struct ObjectAttributeData {
-//     pub value: u8,
-// }
-//
-// impl Default for ObjectAttributeData {
-//     fn default() -> Self {
-//         Self { value: 0 }
-//     }
-// }
-
 /// https://www.nesdev.org/wiki/PPU_registers#PPUSCROLL
 pub struct Scroll {
     horizontal: u8,
@@ -294,22 +293,5 @@ impl Data {
         let result = self.buffer;
         self.buffer = value;
         result
-    }
-}
-
-/// https://www.nesdev.org/wiki/PPU_registers#OAMDMA
-pub struct ObjectAttributeDirectMemoryAccess {
-    pub value: u8,
-}
-
-impl Default for ObjectAttributeDirectMemoryAccess {
-    fn default() -> Self {
-        Self { value: 0 }
-    }
-}
-
-impl ObjectAttributeDirectMemoryAccess {
-    pub fn update(&mut self, data: u8) {
-        self.value = data;
     }
 }

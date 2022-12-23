@@ -161,7 +161,18 @@ impl Memory for Bus {
                             data
                         );
 
-                        self.ppu.write_register(register, data);
+                        // TODO: this isn't the prettiest
+                        if register
+                            == &crate::ppu::registers::Register::ObjectAttributeDirectMemoryAccess
+                        {
+                            // $XX -> $XX00
+                            let begin = ((data * 16) * 16) as usize;
+                            let end = begin + crate::ppu::Ppu::OBJECT_ATTRIBUTE_TABLE_SIZE;
+                            self.ppu.object_attribute_direct_memory_access(&self.cpu_ram[begin..end])
+                        } else {
+                            self.ppu.write_register(register, data);
+                        }
+
                         return;
                     } else {
                         tracing::error!(
