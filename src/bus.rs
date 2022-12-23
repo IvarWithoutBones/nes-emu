@@ -110,6 +110,10 @@ impl Bus {
         tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", addr, data);
         self.cpu_ram[addr] = data;
     }
+
+    pub fn poll_nmi(&self) -> bool {
+        self.ppu.poll_nmi()
+    }
 }
 
 impl Memory for Bus {

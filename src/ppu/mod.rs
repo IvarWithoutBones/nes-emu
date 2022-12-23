@@ -10,6 +10,9 @@ pub struct Ppu {
     mirroring: Mirroring,
     character_rom: Vec<u8>,
 
+    nmi_occured: bool,
+    nmi_output: bool,
+
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
     object_attribute_table: [u8; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
@@ -37,6 +40,9 @@ impl Ppu {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
             mirroring,
             character_rom,
+
+            nmi_occured: false,
+            nmi_output: false,
 
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
             object_attribute_table: [0; Self::OBJECT_ATTRIBUTE_TABLE_SIZE],
@@ -71,9 +77,11 @@ impl Ppu {
         (addr % Self::PALETTE_TABLE_SIZE as u16) as usize
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     fn increment_vram_address(&mut self) {
         self.address
             .increment(self.control.vram_address_increment());
+        tracing::trace!("address register increment: ${:02X}", self.address.value)
     }
 
     /// Helper for reading from OAMDATA
@@ -104,6 +112,19 @@ impl Ppu {
             index = index.wrapping_add(starting_point);
             self.object_attribute_table[index] = *byte;
         }
+    }
+
+    fn read_status(&mut self) -> u8 {
+        self.nmi_occured = false;
+        self.address.reset_latch();
+        self.status.read()
+    }
+
+    fn write_control(&mut self, data: u8) {
+        self.control.update(data);
+        self.nmi_output = self
+            .control
+            .contains(registers::Control::NonMaskableInterruptAtVBlank);
     }
 
     /// Helper for reading from PPUDATA
@@ -161,7 +182,7 @@ impl Ppu {
     #[tracing::instrument(skip(self, register), parent = &self.span)]
     pub fn read_register(&mut self, register: &Register) -> u8 {
         let result = match register {
-            Register::Status => self.status.read(),
+            Register::Status => self.read_status(),
             Register::ObjectAttributeData => self.read_object_attribute(),
             Register::Data => self.read_data(),
             _ => {
@@ -176,7 +197,7 @@ impl Ppu {
     #[tracing::instrument(skip(self, register, data), parent = &self.span)]
     pub fn write_register(&mut self, register: &Register, data: u8) {
         match register {
-            Register::Control => self.control.update(data),
+            Register::Control => self.write_control(data),
             Register::Mask => self.mask.update(data),
             Register::ObjectAttributeAddress => self.object_attribute_address.update(data),
             Register::ObjectAttributeData => self.write_object_attribute(data),
@@ -201,5 +222,9 @@ impl Ppu {
             }
         }
         tracing::trace!("register {:?} write: ${:02X}", register, data);
+    }
+
+    pub fn poll_nmi(&self) -> bool {
+        self.nmi_occured && self.nmi_output
     }
 }

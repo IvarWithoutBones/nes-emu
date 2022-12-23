@@ -50,6 +50,7 @@ pub struct Cpu {
     pub stack_pointer: u8,
     pub flags: CpuFlags,
     pub bus: Bus,
+    nmi: bool,
 }
 
 impl Cpu {
@@ -57,7 +58,8 @@ impl Cpu {
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
     const RESET_CYCLES: u64 = 7;
-    #[allow(dead_code)]
+
+    const NMI_VECTOR: u16 = 0xFFFA;
     const RESET_VECTOR: u16 = 0xFFFC;
 
     pub fn new(bus: Bus) -> Cpu {
@@ -69,6 +71,7 @@ impl Cpu {
             register_x: 0,
             register_y: 0,
             bus,
+            nmi: false,
         }
     }
 
@@ -126,8 +129,15 @@ impl Cpu {
         self.flags.set(CpuFlags::Zero, value == 0);
     }
 
+    pub fn non_maskable_interrupt(&mut self) {
+        self.push_byte(self.flags.bits());
+        self.push_word(self.program_counter); // TODO: Any increments?
+        self.program_counter = self.read_word(Self::NMI_VECTOR);
+    }
+
     pub fn step(&mut self) -> Option<Box<CpuState>> {
         let _span = tracing::span!(tracing::Level::INFO, Cpu::SPAN_NAME).entered();
+
         let opcode = self.read_byte(self.program_counter);
         let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
             format!(
@@ -136,6 +146,11 @@ impl Cpu {
             )
             .as_str(),
         );
+
+        if self.bus.poll_nmi() {
+            self.nmi = true;
+            self.non_maskable_interrupt();
+        }
 
         let state = CpuState {
             instruction: instr.format(self, mode),
@@ -147,6 +162,12 @@ impl Cpu {
             status: self.flags.clone(),
             memory: self.bus.cpu_ram,
         };
+
+        if self.nmi {
+            self.nmi = false;
+            tracing::debug!("{}  {}", self, state.instruction);
+            return Some(Box::new(state));
+        }
 
         if instr.name == "BRK" {
             // TODO: this is a hack

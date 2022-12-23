@@ -172,10 +172,12 @@ impl Status {
         }
     }
 
-    pub fn read(&self) -> u8 {
+    pub fn read(&mut self) -> u8 {
         let _span = tracing::span!(tracing::Level::INFO, "status").entered();
-        tracing::trace!("{}", self);
-        self.bits()
+        let result = self.bits();
+        self.set(Self::VBlankStarted, false);
+        tracing::trace!("{}", result);
+        result
     }
 }
 
@@ -271,9 +273,9 @@ impl Address {
         self.mirror();
     }
 
-    // fn reset_latch(&mut self) {
-    //     self.latch_high = true;
-    // }
+    pub fn reset_latch(&mut self) {
+        self.latch_high = true;
+    }
 }
 
 /// https://www.nesdev.org/wiki/PPU_registers#PPUDATA
