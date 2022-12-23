@@ -15,6 +15,7 @@ pub struct Ppu {
     nmi_occured: bool,
     nmi_output: bool,
 
+    data_buffer: u8,
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
     vram: [u8; Self::VRAM_SIZE],
     pub oam: ObjectAttributeMemory,
@@ -24,7 +25,6 @@ pub struct Ppu {
     status: registers::Status,
     scroll: registers::Scroll,
     address: registers::Address,
-    data: registers::Data,
 }
 
 impl Ppu {
@@ -44,6 +44,7 @@ impl Ppu {
             nmi_occured: false,
             nmi_output: false,
 
+            data_buffer: 0,
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
             vram: [0; Self::VRAM_SIZE],
             oam: ObjectAttributeMemory::default(),
@@ -53,8 +54,13 @@ impl Ppu {
             status: registers::Status::default(),
             scroll: registers::Scroll::default(),
             address: registers::Address::default(),
-            data: registers::Data::default(),
         }
+    }
+
+    fn update_data_buffer(&mut self, value: u8) -> u8 {
+        let result = self.data_buffer;
+        self.data_buffer = value;
+        result
     }
 
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
@@ -105,11 +111,11 @@ impl Ppu {
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             let result = self.character_rom[addr as usize];
             tracing::trace!("pattern table read at ${:04X}: ${:02X}", addr, result);
-            return self.data.update_buffer(result);
+            return self.update_data_buffer(result);
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
             let result = self.vram[self.mirror_nametable_addr(addr) as usize];
             tracing::trace!("nametable read at ${:04X}: ${:02X}", addr, result);
-            return self.data.update_buffer(result);
+            return self.update_data_buffer(result);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             // TODO: This should set the data buffer to the nametable "below" the pattern table
             let result = self.palette_table[self.mirror_palette_table(addr)];

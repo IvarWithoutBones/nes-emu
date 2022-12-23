@@ -1,0 +1,56 @@
+use bitflags::bitflags;
+
+bitflags! {
+    /*
+        https://www.nesdev.org/wiki/PPU_registers#PPUCTRL
+
+        7  bit  0
+        ---- ----
+        VPHB SINN
+        |||| ||||
+        |||| ||++- Base nametable address
+        |||| ||    (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)
+        |||| |+--- VRAM address increment per CPU read/write of PPUDATA
+        |||| |     (0: add 1, going across; 1: add 32, going down)
+        |||| +---- Sprite pattern table address for 8x8 sprites
+        ||||       (0: $0000; 1: $1000; ignored in 8x16 mode)
+        |||+------ Background pattern table address (0: $0000; 1: $1000)
+        ||+------- Sprite size (0: 8x8 pixels; 1: 8x16 pixels – see PPU OAM#Byte 1)
+        |+-------- PPU parent/child select
+        |          (0: read backdrop from EXT pins; 1: output color on EXT pins)
+        +--------- Generate an NMI at the start of the vertical blanking interval (0: off; 1: on)
+    */
+    pub struct Control: u8 {
+        const BaseNametableAddress1        = 0b0000_0001;
+        const BaseNametableAddress2        = 0b0000_0010;
+        const VramAdressIncrement          = 0b0000_0100;
+        const SpritePatternTableAddress    = 0b0000_1000;
+        const BackgroundPatternTable       = 0b0001_0000;
+        const SpriteSize                   = 0b0010_0000;
+        const ParentChildSelect            = 0b0100_0000;
+        const NonMaskableInterruptAtVBlank = 0b1000_0000;
+    }
+}
+
+impl Default for Control {
+    fn default() -> Self {
+        Self::from_bits_truncate(0)
+    }
+}
+
+impl Control {
+    pub fn vram_address_increment(&self) -> u8 {
+        const VRAM_ADDR_INCREMENT_IF_FLAG: u8 = 32;
+        const VRAM_ADDR_INCREMENT_NO_FLAG: u8 = 1;
+
+        if self.contains(Self::VramAdressIncrement) {
+            VRAM_ADDR_INCREMENT_IF_FLAG
+        } else {
+            VRAM_ADDR_INCREMENT_NO_FLAG
+        }
+    }
+
+    pub fn update(&mut self, value: u8) {
+        Self::from_bits_truncate(value);
+    }
+}
