@@ -1,5 +1,6 @@
 /// State of execution. This is used to step per-instruction and to pause the CPU.
 #[derive(Clone)]
+
 pub struct StepState {
     pub paused: bool,
     pub step: bool,

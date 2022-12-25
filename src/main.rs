@@ -7,7 +7,7 @@ mod ppu;
 use bus::Bus;
 use clap::Parser;
 use cpu::Cpu;
-use gui::{step_state::StepState, Gui};
+use gui::{cpu_debugger::StepState, Gui};
 use std::{sync::mpsc::channel, thread};
 use tracing;
 use tracing_subscriber;
@@ -70,12 +70,7 @@ fn main() {
         let mut cpu = Cpu::new(bus);
         cpu.reset();
 
-        let mut index = 0;
         loop {
-            if index == 100000 {
-                break;
-            }
-
             if let Some(step_receiver) = step_receiver.as_ref() {
                 if let Ok(new_step_state) = step_receiver.try_recv() {
                     step_state = new_step_state;
@@ -94,16 +89,16 @@ fn main() {
             if let Some(instr_state) = cpu.step() {
                 if let Some(ref cpu_state_sender) = cpu_state_sender {
                     if cpu_state_sender.send(instr_state).is_err() {
+                        tracing::error!("failed to send CPU state, exiting cpu thread");
                         // GUI has died, so the CPU should too.
                         break;
                     };
                 }
             } else {
+                tracing::error!("error while stepping the CPU, exiting cpu thread");
                 // Some sort of error occured, should communicate to the GUI in the future.
                 break;
             }
-
-            index += 1;
         }
     });
 

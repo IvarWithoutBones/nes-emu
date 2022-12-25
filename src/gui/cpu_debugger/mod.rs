@@ -1,4 +1,7 @@
-use super::{default_frame, header_label, step_state::StepState};
+pub mod step_state;
+
+pub use step_state::StepState;
+use super::{default_frame, header_label};
 use crate::{
     bus::CPU_RAM_SIZE,
     cpu::{CpuFlags, CpuState},

@@ -1,13 +1,11 @@
-mod cpu_debugger;
-mod frame;
-pub mod step_state;
+pub mod cpu_debugger;
+mod screen;
 
 use crate::cpu::CpuState;
-use cpu_debugger::CpuDebugger;
+use cpu_debugger::{step_state::StepState, CpuDebugger};
 use eframe::egui;
-use frame::Frame;
+use screen::Screen;
 use std::sync::mpsc::{Receiver, Sender};
-use step_state::StepState;
 
 #[derive(PartialEq)]
 enum View {
@@ -17,7 +15,7 @@ enum View {
 
 pub struct Gui {
     span: tracing::Span,
-    frame: Frame,
+    frame: Screen,
     cpu_debugger: CpuDebugger,
     current_view: View,
 }
@@ -28,11 +26,10 @@ impl Gui {
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
     ) -> Self {
-        let cpu_debugger = CpuDebugger::new(cpu_state_receiver, step_sender);
         Self {
             span,
-            frame: Frame::new(),
-            cpu_debugger,
+            frame: Screen::new(),
+            cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
         }
     }
@@ -54,12 +51,29 @@ impl Gui {
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
-                ui.label("Open").on_hover_text("TODO");
+                let open_file = ui.button("Open").on_hover_text("TODO");
+                if open_file.clicked() {
+                    tracing::warn!("Open file is not implemented");
+                }
+
+                let quit = ui.button("Quit").on_hover_text("Exit the application");
+                if quit.clicked() {
+                    tracing::info!("quit button clicked, exiting");
+                    std::process::exit(0);
+                };
             });
 
             ui.menu_button("Show", |ui| {
-                ui.radio_value(&mut self.current_view, View::Screen, "Screen");
-                ui.radio_value(&mut self.current_view, View::CpuDebugger, "CPU Debugger");
+                let screen = ui.radio_value(&mut self.current_view, View::Screen, "Screen");
+                if screen.clicked() {
+                    tracing::info!("switching view to screen");
+                }
+
+                let cpu_debugger =
+                    ui.radio_value(&mut self.current_view, View::CpuDebugger, "CPU Debugger");
+                if cpu_debugger.clicked() {
+                    tracing::info!("switching view to CPU debugger");
+                }
             })
         });
     }
