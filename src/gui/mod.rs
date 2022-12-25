@@ -1,20 +1,23 @@
 mod cpu_debugger;
+mod frame;
 pub mod step_state;
 
 use crate::cpu::CpuState;
 use cpu_debugger::CpuDebugger;
 use eframe::egui;
+use frame::Frame;
 use std::sync::mpsc::{Receiver, Sender};
 use step_state::StepState;
 
 #[derive(PartialEq)]
 enum View {
-    Game,
+    Screen,
     CpuDebugger,
 }
 
 pub struct Gui {
     span: tracing::Span,
+    frame: Frame,
     cpu_debugger: CpuDebugger,
     current_view: View,
 }
@@ -28,8 +31,9 @@ impl Gui {
         let cpu_debugger = CpuDebugger::new(cpu_state_receiver, step_sender);
         Self {
             span,
+            frame: Frame::new(),
             cpu_debugger,
-            current_view: View::CpuDebugger,
+            current_view: View::Screen,
         }
     }
 
@@ -54,7 +58,7 @@ impl Gui {
             });
 
             ui.menu_button("Show", |ui| {
-                ui.radio_value(&mut self.current_view, View::Game, "Game");
+                ui.radio_value(&mut self.current_view, View::Screen, "Screen");
                 ui.radio_value(&mut self.current_view, View::CpuDebugger, "CPU Debugger");
             })
         });
@@ -68,11 +72,14 @@ impl eframe::App for Gui {
             self.menu_bar(ui);
         });
 
-        if self.current_view == View::CpuDebugger {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ctx, |ui| match self.current_view {
+            View::CpuDebugger => {
                 ui.add(self.cpu_debugger.widget());
-            });
-        }
+            }
+            View::Screen => {
+                ui.add(self.frame.widget());
+            }
+        });
 
         // Calling this here will request another frame immediately after this one
         ctx.request_repaint();
