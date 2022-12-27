@@ -1,7 +1,7 @@
 pub mod cpu_debugger;
 mod screen;
 
-use crate::cpu::CpuState;
+use crate::{cpu::CpuState, ppu::renderer::PixelBuffer};
 use cpu_debugger::{step_state::StepState, CpuDebugger};
 use eframe::egui;
 use screen::Screen;
@@ -15,7 +15,7 @@ enum View {
 
 pub struct Gui {
     span: tracing::Span,
-    frame: Screen,
+    screen: Screen,
     cpu_debugger: CpuDebugger,
     current_view: View,
 }
@@ -25,10 +25,11 @@ impl Gui {
         span: tracing::Span,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
+        pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) -> Self {
         Self {
             span,
-            frame: Screen::new(),
+            screen: Screen::new(pixel_receiver),
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
         }
@@ -38,13 +39,21 @@ impl Gui {
         window_title: &str,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
+        pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
         let options = eframe::NativeOptions::default();
         eframe::run_native(
             window_title,
             options,
-            Box::new(|_cc| Box::new(Self::new(span, cpu_state_receiver, step_sender))),
+            Box::new(|_cc| {
+                Box::new(Self::new(
+                    span,
+                    cpu_state_receiver,
+                    step_sender,
+                    pixel_receiver,
+                ))
+            }),
         );
     }
 
@@ -91,7 +100,7 @@ impl eframe::App for Gui {
                 ui.add(self.cpu_debugger.widget());
             }
             View::Screen => {
-                ui.add(self.frame.widget());
+                ui.add(self.screen.widget());
             }
         });
 
@@ -106,7 +115,7 @@ fn header_label(ui: &mut egui::Ui, name: &str) {
     });
 }
 
-// // To make sure margins are consistent across panels
+/// Make sure margins are consistent across panels
 fn default_frame() -> egui::Frame {
     egui::Frame::central_panel(&egui::Style::default())
 }

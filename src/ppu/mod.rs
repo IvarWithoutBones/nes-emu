@@ -1,11 +1,13 @@
 mod object_attribute;
 pub(crate) mod registers;
+pub mod renderer;
 
+use self::renderer::{PixelBuffer, Renderer};
 use super::bus::{Clock, CycleCount};
 use crate::cartridge::Mirroring;
 use object_attribute::ObjectAttributeMemory;
 use registers::Register;
-use std::ops::RangeInclusive;
+use std::{ops::RangeInclusive, sync::mpsc::Sender};
 
 type ScanlineCount = u16;
 
@@ -14,6 +16,7 @@ pub struct Ppu {
     span: tracing::Span,
     mirroring: Mirroring,
     character_rom: Vec<u8>,
+    pub renderer: Renderer,
 
     data_buffer: u8,
     palette_table: [u8; Self::PALETTE_TABLE_SIZE],
@@ -39,11 +42,16 @@ impl Ppu {
     const PALETTE_TABLE_SIZE: usize = 32;
     const VRAM_SIZE: usize = 0x800;
 
-    pub fn new(character_rom: Vec<u8>, mirroring: Mirroring) -> Self {
+    pub fn new(
+        pixel_sender: Sender<Box<PixelBuffer>>,
+        character_rom: Vec<u8>,
+        mirroring: Mirroring,
+    ) -> Self {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
             mirroring,
-            character_rom,
+            character_rom: character_rom.clone(),
+            renderer: Renderer::new(character_rom, pixel_sender),
 
             data_buffer: 0,
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
@@ -225,6 +233,9 @@ impl Clock for Ppu {
         const CYCLES_PER_SCANLINE: CycleCount = 341;
         const SCANLINES_PER_FRAME: ScanlineCount = 261;
         const VBLANK_SCANLINE: ScanlineCount = 241;
+
+        // TODO: remove
+        self.renderer.show_tiles_in_bank(0);
 
         self.cycles += cycles;
         if self.cycles >= CYCLES_PER_SCANLINE {

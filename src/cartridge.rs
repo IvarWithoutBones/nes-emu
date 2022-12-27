@@ -83,7 +83,7 @@ impl Header {
             Self::SIGNATURE[2],
             Self::SIGNATURE[3],
             1, // Program ROM pages
-            0, // Character ROM pages
+            1, // Character ROM pages
             0, // Flags 6
             0, // Flags 7
             0, // Flags 8
@@ -155,7 +155,10 @@ impl Cartridge {
         let header = Header::generate().to_vec();
         let mut program: Vec<u8> = vec![header, data].concat();
         let len = program.len();
-        program.resize(Self::PROGRAM_ROM_PAGE_SIZE + len, 0xEA); // NOP
+        program.resize(
+            Self::PROGRAM_ROM_PAGE_SIZE + Self::CHARACTER_ROM_PAGE_SIZE + len,
+            0xEA, // NOP
+        );
         program[len] = 0x00; // BRK
         Self::from_bytes(&program)
     }

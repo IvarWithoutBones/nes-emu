@@ -44,7 +44,8 @@ fn main() {
         std::process::exit(1);
     });
 
-    let bus: Bus = Bus::new(&rom_data);
+    let (pixel_sender, pixel_receiver) = channel();
+    let bus: Bus = Bus::new(pixel_sender, &rom_data);
 
     // CPU state communication if the GUI is enabled
     let mut step_receiver = None;
@@ -64,7 +65,7 @@ fn main() {
 
     // Start the GUI, if enabled
     if !args.without_gui {
-        Gui::run("NES emu", state_receiver.unwrap(), step_sender.unwrap());
+        Gui::run("NES emu", state_receiver.unwrap(), step_sender.unwrap(), pixel_receiver);
     }
 
     if cpu_handle.join().is_err() {

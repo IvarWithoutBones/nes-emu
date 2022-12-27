@@ -1,6 +1,8 @@
 use crate::cartridge::Cartridge;
+use crate::ppu::renderer::PixelBuffer;
 use crate::ppu::{self, *};
 use std::ops::RangeInclusive;
+use std::sync::mpsc::{channel, Sender};
 
 pub const CPU_RAM_SIZE: usize = 2048;
 const CPU_RAM_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
@@ -50,26 +52,26 @@ pub struct Bus {
 }
 
 impl Bus {
-    fn from_cart(cart: Cartridge) -> Bus {
+    fn from_cart(pixel_sender: Sender<Box<PixelBuffer>>, cart: Cartridge) -> Bus {
         let span = tracing::span!(tracing::Level::INFO, "bus");
         tracing::info!("succesfully initialized");
         Bus {
             span,
             cartridge: cart.clone(),
-            ppu: Ppu::new(cart.character_rom, cart.header.mirroring),
+            ppu: Ppu::new(pixel_sender, cart.character_rom, cart.header.mirroring),
             cpu_ram: [0; CPU_RAM_SIZE],
             cycles: 0,
         }
     }
 
-    pub fn new(rom_data: &Vec<u8>) -> Self {
+    pub fn new(pixel_sender: Sender<Box<PixelBuffer>>, rom_data: &Vec<u8>) -> Self {
         // Should the CPU be initialized here as well?
         let cartridge = Cartridge::from_bytes(rom_data).unwrap_or_else(|err| {
             tracing::error!("failed to load cartridge: \"{}\"", err);
             std::process::exit(1);
         });
 
-        Self::from_cart(cartridge)
+        Self::from_cart(pixel_sender, cartridge)
     }
 
     const fn to_cpu_ram_address(address: u16) -> usize {
@@ -85,7 +87,7 @@ impl Bus {
             std::process::exit(1);
         });
 
-        Self::from_cart(cartridge)
+        Self::from_cart(channel().0, cartridge)
     }
 }
 
