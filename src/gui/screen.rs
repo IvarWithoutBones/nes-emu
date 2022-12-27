@@ -18,7 +18,7 @@ impl Screen {
 
     pub fn widget(&mut self) -> impl egui::Widget + '_ {
         move |ui: &mut egui::Ui| {
-            while let Ok(buf) = self.receiver.try_recv() {
+            if let Some(buf) = self.receiver.try_iter().last() {
                 self.update_texture(ui.ctx(), buf);
             }
 

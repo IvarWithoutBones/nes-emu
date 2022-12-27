@@ -31,7 +31,7 @@ pub struct Ppu {
 
     cycles: CycleCount,
     scanline: ScanlineCount,
-    trigger_nmi: bool,
+    pub trigger_nmi: bool,
 }
 
 impl Ppu {
@@ -50,8 +50,8 @@ impl Ppu {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
             mirroring,
-            character_rom: character_rom.clone(),
-            renderer: Renderer::new(character_rom, pixel_sender),
+            character_rom,
+            renderer: Renderer::new(pixel_sender),
 
             data_buffer: 0,
             palette_table: [0; Self::PALETTE_TABLE_SIZE],
@@ -93,6 +93,13 @@ impl Ppu {
         let result = self.data_buffer;
         self.data_buffer = value;
         result
+    }
+
+    pub fn render(&mut self) {
+        let bank = self.control.bg_pattern_bank_addr();
+        self.renderer
+            .render_bg(bank, &self.character_rom, &self.vram);
+        self.renderer.update();
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
@@ -234,9 +241,6 @@ impl Clock for Ppu {
         const SCANLINES_PER_FRAME: ScanlineCount = 261;
         const VBLANK_SCANLINE: ScanlineCount = 241;
 
-        // TODO: remove
-        self.renderer.show_tiles_in_bank(0);
-
         self.cycles += cycles;
         if self.cycles >= CYCLES_PER_SCANLINE {
             self.set_cycles(self.cycles - CYCLES_PER_SCANLINE);
@@ -248,6 +252,7 @@ impl Clock for Ppu {
                 if self.control.nmi_at_vblank() {
                     self.trigger_nmi = true;
                 }
+                self.render();
             }
 
             if self.scanline > SCANLINES_PER_FRAME {

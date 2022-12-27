@@ -21,11 +21,10 @@ bitflags! {
         +--------- Generate an NMI at the start of the vertical blanking interval (0: off; 1: on)
     */
     pub struct Control: u8 {
-        const BaseNametableAddress1        = 0b0000_0001;
-        const BaseNametableAddress2        = 0b0000_0010;
+        const NametableAddress             = 0b0000_0011;
         const VramAdressIncrement          = 0b0000_0100;
         const SpritePatternTableAddress    = 0b0000_1000;
-        const BackgroundPatternTable       = 0b0001_0000;
+        const BackgroundPatternBank        = 0b0001_0000;
         const SpriteSize                   = 0b0010_0000;
         const ParentChildSelect            = 0b0100_0000;
         const NonMaskableInterruptAtVBlank = 0b1000_0000;
@@ -53,5 +52,23 @@ impl Control {
 
     pub fn nmi_at_vblank(&self) -> bool {
         self.contains(Self::NonMaskableInterruptAtVBlank)
+    }
+
+    pub fn bg_pattern_bank_addr(&self) -> usize {
+        if self.contains(Self::BackgroundPatternBank) {
+            0x1000
+        } else {
+            0
+        }
+    }
+
+    pub fn base_nametable_addr(&self) -> usize {
+        match self.bits() & Self::NametableAddress.bits() {
+            0 => 0x2000,
+            1 => 0x2400,
+            2 => 0x2800,
+            3 => 0x2C00,
+            _ => unreachable!(),
+        }
     }
 }

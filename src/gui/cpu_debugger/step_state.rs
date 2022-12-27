@@ -9,7 +9,7 @@ pub struct StepState {
 impl Default for StepState {
     fn default() -> Self {
         Self {
-            paused: true,
+            paused: false,
             step: true,
         }
     }

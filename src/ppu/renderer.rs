@@ -1,6 +1,8 @@
 use std::ops::RangeInclusive;
 use std::sync::mpsc::Sender;
 
+use super::Ppu;
+
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
 const RGB_LEN: usize = 3;
@@ -12,25 +14,24 @@ pub const fn pixel_buffer_len() -> usize {
 pub type PixelBuffer = [u8; pixel_buffer_len()];
 
 pub struct Renderer {
-    character_rom: Vec<u8>,
     pixel_sender: Sender<Box<PixelBuffer>>,
     pixels: Box<PixelBuffer>,
 }
 
 impl Renderer {
-    pub fn new(character_rom: Vec<u8>, pixel_sender: Sender<Box<PixelBuffer>>) -> Self {
+    pub fn new(pixel_sender: Sender<Box<PixelBuffer>>) -> Self {
         Self {
             pixels: Box::new([0; pixel_buffer_len()]),
-            character_rom,
             pixel_sender,
         }
     }
 
-    pub const fn to_tile_range(bank: usize, tile_index: usize) -> RangeInclusive<usize> {
-        const BANK_SIZE: usize = 0x1000;
-        let start = (bank * BANK_SIZE) + (tile_index * 16);
-        let end = start + 15;
-        start..=end
+    pub fn update(&mut self) {
+        self.pixel_sender
+            .send(self.pixels.clone())
+            .unwrap_or_else(|e| {
+                tracing::error!("failed to send pixel buffer: {}", e);
+            });
     }
 
     fn set_pixel(pixels: &mut Box<PixelBuffer>, x: usize, y: usize, color: (u8, u8, u8)) {
@@ -42,11 +43,15 @@ impl Renderer {
         pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
-    fn show_tile(&mut self, bank: usize, tile_index: usize, x_offset: usize, y_offset: usize) {
+    pub const fn to_tile_range(bank: usize, tile_index: usize) -> RangeInclusive<usize> {
+        let start = bank + tile_index * 16;
+        let end = start + 15;
+        start..=end
+    }
+
+    fn render_tile(&mut self, tile: &[u8], x_offset: usize, y_offset: usize) {
         const TILE_SIZE: usize = 8;
         const OFFSET_BETWEEN_PLANES: usize = 8;
-
-        let tile = &self.character_rom[Self::to_tile_range(bank, tile_index)];
 
         for y in 0..TILE_SIZE {
             // A row of 8x8 pixels
@@ -63,7 +68,7 @@ impl Renderer {
                     1 => SYSTEM_PALLETE[0x23],
                     2 => SYSTEM_PALLETE[0x27],
                     3 => SYSTEM_PALLETE[0x30],
-                    _ => panic!("can't be"),
+                    _ => unreachable!(),
                 };
 
                 // Shift the planes to the right to get the next pixel
@@ -75,7 +80,9 @@ impl Renderer {
         }
     }
 
-    pub fn show_tiles_in_bank(&mut self, bank: usize) {
+    // For the debugger in the future
+    #[allow(dead_code)]
+    pub fn show_tiles_in_bank(&mut self, character_rom: &Vec<u8>, bank: usize) {
         assert!(bank <= 1);
         const TILES_PER_BANK: usize = 256;
         const TILES_PER_ROW: usize = 20;
@@ -89,15 +96,22 @@ impl Renderer {
                 x_offset = 0;
             }
 
-            self.show_tile(bank, tile_index, x_offset, y_offset);
+            let tile = &character_rom[Self::to_tile_range(bank, tile_index)];
+            self.render_tile(tile, x_offset, y_offset);
             x_offset += 10;
         }
+    }
 
-        self.pixel_sender
-            .send(self.pixels.clone())
-            .unwrap_or_else(|e| {
-                tracing::error!("failed to send pixel buffer: {}", e);
-            });
+    pub fn render_bg(&mut self, bank: usize, chr_rom: &Vec<u8>, vram: &[u8; Ppu::VRAM_SIZE]) {
+        // TODO: Assuming first nametable
+        for i in 0..0x03c0 {
+            let tile_index = vram[i] as usize;
+            let tile = &chr_rom[Self::to_tile_range(bank, tile_index)];
+            let x = (i % 32) * 8;
+            let y = (i / 32) * 8;
+            // tracing::info!("rendering tile {} at {},{}", tile_index, x, y);
+            self.render_tile(tile, x, y);
+        }
     }
 }
 
