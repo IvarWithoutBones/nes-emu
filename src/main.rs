@@ -6,9 +6,8 @@ mod ppu;
 
 use bus::Bus;
 use clap::Parser;
-use cpu::Cpu;
-use gui::{cpu_debugger::StepState, Gui};
-use std::{sync::mpsc::channel, thread};
+use gui::Gui;
+use std::sync::mpsc::channel;
 use tracing;
 use tracing_subscriber;
 
@@ -45,65 +44,27 @@ fn main() {
         std::process::exit(1);
     });
 
-    // Instantiate the bus
     let bus: Bus = Bus::new(&rom_data);
 
-    // CPU state communication
-    let (cpu_state_sender, cpu_state_receiver) = channel();
-    let (step_sender, step_receiver) = channel();
-
-    let cpu_state_sender = if args.without_gui {
-        None
+    // CPU state communication if the GUI is enabled
+    let mut step_receiver = None;
+    let mut state_sender = None;
+    let (state_receiver, step_sender) = if !args.without_gui {
+        let (state_sender_c, state_receiver_c) = channel();
+        let (step_sender_c, step_receiver_c) = channel();
+        state_sender = Some(state_sender_c);
+        step_receiver = Some(step_receiver_c);
+        (Some(state_receiver_c), Some(step_sender_c))
     } else {
-        Some(cpu_state_sender)
+        (None, None)
     };
 
-    let step_receiver = if args.without_gui {
-        None
-    } else {
-        Some(step_receiver)
-    };
+    // Boot up the CPU
+    let cpu_handle = cpu::spawn_thread(bus, state_sender, step_receiver);
 
-    // Actually spawn the CPU thread
-    let cpu_handle = thread::spawn(move || {
-        let mut step_state = StepState::default();
-        let mut cpu = Cpu::new(bus);
-        cpu.reset();
-
-        loop {
-            if let Some(step_receiver) = step_receiver.as_ref() {
-                if let Ok(new_step_state) = step_receiver.try_recv() {
-                    step_state = new_step_state;
-                }
-
-                if step_state.paused {
-                    if step_state.step {
-                        step_state.step = false;
-                    } else {
-                        thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                }
-            }
-
-            if let Some(instr_state) = cpu.step() {
-                if let Some(ref cpu_state_sender) = cpu_state_sender {
-                    if cpu_state_sender.send(instr_state).is_err() {
-                        tracing::error!("failed to send CPU state, exiting cpu thread");
-                        // GUI has died, so the CPU should too.
-                        break;
-                    };
-                }
-            } else {
-                tracing::error!("error while stepping the CPU, exiting cpu thread");
-                // Some sort of error occured, should communicate to the GUI in the future.
-                break;
-            }
-        }
-    });
-
+    // Start the GUI, if enabled
     if !args.without_gui {
-        Gui::run("NES emu", cpu_state_receiver, step_sender);
+        Gui::run("NES emu", state_receiver.unwrap(), step_sender.unwrap());
     }
 
     if cpu_handle.join().is_err() {

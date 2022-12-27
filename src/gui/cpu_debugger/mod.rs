@@ -1,11 +1,11 @@
 pub mod step_state;
 
-pub use step_state::StepState;
 use super::{default_frame, header_label};
 use crate::{
     bus::CPU_RAM_SIZE,
-    cpu::{CpuFlags, CpuState},
+    cpu::{flags::CpuFlags, CpuState},
 };
+pub use step_state::StepState;
 
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;

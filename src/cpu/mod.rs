@@ -1,11 +1,14 @@
 mod addressing_mode;
 mod assembler;
+pub mod flags;
 mod instructions;
 
 use crate::bus::{Bus, Clock, CycleCount, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
-use bitflags::bitflags;
+use crate::gui::cpu_debugger::StepState;
+use flags::CpuFlags;
 use instructions::Instruction;
 use std::fmt;
+use std::sync::mpsc::{Receiver, Sender};
 
 /// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
 pub struct CpuState {
@@ -17,28 +20,6 @@ pub struct CpuState {
     pub stack_pointer: u8,
     pub status: CpuFlags,
     pub memory: [u8; CPU_RAM_SIZE],
-}
-
-bitflags! {
-    /// See https://www.nesdev.org/wiki/Status_flags
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct CpuFlags: u8 {
-        const Carry              = 0b0000_0001;
-        const Zero               = 0b0000_0010;
-        const InterruptsDisabled = 0b0000_0100;
-        const Decimal            = 0b0000_1000; // No effect
-        const Break              = 0b0001_0000;
-        const Break2             = 0b0010_0000; // No effect
-        const Overflow           = 0b0100_0000;
-        const Negative           = 0b1000_0000;
-    }
-}
-
-impl Default for CpuFlags {
-    fn default() -> CpuFlags {
-        Self::InterruptsDisabled | Self::Break | Self::Break2
-        // Self::IRQ | Self::BREAK2 // Hack to diff against nestest log, above is correct
-    }
 }
 
 /// See https://www.nesdev.org/wiki/CPU
@@ -212,31 +193,6 @@ impl Clock for Cpu {
     }
 }
 
-impl CpuFlags {
-    const fn format(&self, flag: CpuFlags, display: char) -> char {
-        if self.contains(flag) {
-            display
-        } else {
-            '-'
-        }
-    }
-}
-
-impl fmt::Display for CpuFlags {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut string = String::with_capacity(8);
-        string.push(self.format(CpuFlags::Negative, 'N'));
-        string.push(self.format(CpuFlags::Overflow, 'O'));
-        string.push(self.format(CpuFlags::Break2, 'B'));
-        string.push(self.format(CpuFlags::Break, 'B'));
-        string.push(self.format(CpuFlags::Decimal, 'D'));
-        string.push(self.format(CpuFlags::InterruptsDisabled, 'I'));
-        string.push(self.format(CpuFlags::Zero, 'Z'));
-        string.push(self.format(CpuFlags::Carry, 'C'));
-        write!(f, "{}", string)
-    }
-}
-
 impl fmt::Display for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -252,6 +208,50 @@ impl fmt::Display for Cpu {
             self.flags
         )
     }
+}
+
+/// Spawn and run the CPU in a separate thread
+pub fn spawn_thread(
+    bus: Bus,
+    state_sender: Option<Sender<Box<CpuState>>>,
+    step_receiver: Option<Receiver<StepState>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut step_state = StepState::default();
+        let mut cpu = Cpu::new(bus);
+        cpu.reset();
+
+        loop {
+            if let Some(step_receiver) = step_receiver.as_ref() {
+                if let Ok(new_step_state) = step_receiver.try_recv() {
+                    step_state = new_step_state;
+                }
+
+                if step_state.paused {
+                    if step_state.step {
+                        step_state.step = false;
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(instr_state) = cpu.step() {
+                if let Some(ref cpu_state_sender) = state_sender {
+                    if cpu_state_sender.send(instr_state).is_err() {
+                        tracing::error!("failed to send CPU state, exiting cpu thread");
+                        // GUI has died, so the CPU should too.
+                        break;
+                    };
+                }
+            } else {
+                tracing::error!("error while stepping the CPU, exiting cpu thread");
+                // Some sort of error occured, should communicate to the GUI in the future.
+                break;
+            }
+        }
+    })
 }
 
 #[cfg(test)]
