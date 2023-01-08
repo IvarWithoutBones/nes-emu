@@ -67,7 +67,7 @@ impl CpuDebugger {
 
     /// Returns a widget containing the CPU debugger, to be drawn with egui
     pub fn widget(&mut self) -> impl egui::Widget + '_ {
-        self.update_cpu_state_cache();
+        self.update_buffer();
 
         move |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
@@ -100,7 +100,7 @@ impl CpuDebugger {
         self.cpu_states.get(selected_index)
     }
 
-    fn update_cpu_state_cache(&mut self) {
+    pub fn update_buffer(&mut self) {
         // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {
             self.cpu_states.push(state);

@@ -34,13 +34,13 @@ impl Renderer {
             });
     }
 
-    fn set_pixel(pixels: &mut Box<PixelBuffer>, x: usize, y: usize, color: (u8, u8, u8)) {
+    fn set_pixel(&mut self, x: usize, y: usize, color: (u8, u8, u8)) {
         if x >= WIDTH || y >= HEIGHT {
             return;
         }
 
         let base = (y * WIDTH + x) * RGB_LEN;
-        pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
+        self.pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
     pub const fn to_tile_range(bank: usize, tile_index: usize) -> RangeInclusive<usize> {
@@ -75,7 +75,7 @@ impl Renderer {
                 upper_plane = upper_plane >> 1;
                 lower_plane = lower_plane >> 1;
 
-                Self::set_pixel(&mut self.pixels, x_offset + x, y_offset + y, rgb);
+                self.set_pixel(x_offset + x, y_offset + y, rgb);
             }
         }
     }

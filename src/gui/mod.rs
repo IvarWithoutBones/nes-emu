@@ -91,6 +91,11 @@ impl Gui {
 impl eframe::App for Gui {
     #[tracing::instrument(skip(self, ctx, _frame), parent = &self.span)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Not updating the buffers will cause a memory leak because the MPSC channels wont be emptied.
+        // TODO: Switch to a bounded crossbeam channel to avoid this.
+        self.screen.update_buffer(ctx);
+        self.cpu_debugger.update_buffer();
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.menu_bar(ui);
         });

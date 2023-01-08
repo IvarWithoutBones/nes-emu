@@ -18,13 +18,10 @@ impl Screen {
 
     pub fn widget(&mut self) -> impl egui::Widget + '_ {
         move |ui: &mut egui::Ui| {
-            if let Some(buf) = self.receiver.try_iter().last() {
-                self.update_texture(ui.ctx(), buf);
-            }
-
             // TODO: Retain the original aspect ratio
             let width = ui.available_width();
             let height = ui.available_height();
+
             ui.horizontal(|ui| {
                 if let Some(texture) = &self.texture {
                     ui.image(texture, [width, height]);
@@ -34,12 +31,14 @@ impl Screen {
         }
     }
 
-    /// Update the internal texture with the current pixel buffer. Should only be called when the buffer has changed.
-    fn update_texture(&mut self, ctx: &egui::Context, pixels: Box<PixelBuffer>) {
-        self.texture = Some(ctx.load_texture(
-            "screen-with-pixels",
-            egui::ColorImage::from_rgb([WIDTH, HEIGHT], &*pixels),
-            egui::TextureOptions::NEAREST,
-        ));
+    /// Update the internal texture with a pixel buffer, if the PPU has generated one.
+    pub fn update_buffer(&mut self, ctx: &egui::Context) {
+        if let Some(buf) = self.receiver.try_iter().last() {
+            self.texture = Some(ctx.load_texture(
+                "screen-with-pixels",
+                egui::ColorImage::from_rgb([WIDTH, HEIGHT], &*buf),
+                egui::TextureOptions::NEAREST,
+            ));
+        }
     }
 }
