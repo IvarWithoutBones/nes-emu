@@ -37,11 +37,13 @@ impl Default for Control {
     }
 }
 
-impl Control {
-    pub fn update(&mut self, value: u8) {
-        Self::from_bits_truncate(value);
+impl From<u8> for Control {
+    fn from(val: u8) -> Self {
+        Self::from_bits_truncate(val)
     }
+}
 
+impl Control {
     pub fn vram_address_increment(&self) -> u8 {
         if self.contains(Self::VramAdressIncrement) {
             32
@@ -62,13 +64,13 @@ impl Control {
         }
     }
 
-    pub fn base_nametable_addr(&self) -> usize {
-        match self.bits() & Self::NametableAddress.bits() {
-            0 => 0x2000,
-            1 => 0x2400,
-            2 => 0x2800,
-            3 => 0x2C00,
-            _ => unreachable!(),
-        }
-    }
+    // pub fn base_nametable_addr(&self) -> usize {
+    //     match self.bits() & Self::NametableAddress.bits() {
+    //         0 => 0x2000,
+    //         1 => 0x2400,
+    //         2 => 0x2800,
+    //         3 => 0x2C00,
+    //         _ => unreachable!(),
+    //     }
+    // }
 }

@@ -171,7 +171,14 @@ impl Memory for Bus {
 impl Clock for Bus {
     fn tick_internal(&mut self, cycles: CycleCount) {
         self.cycles += cycles;
+
+        let vblank_before = self.ppu.status.in_vblank();
         self.ppu.tick(cycles);
+        let vblank_after = self.ppu.status.in_vblank();
+
+        if !vblank_before && vblank_after {
+            self.ppu.render();
+        }
     }
 
     fn get_cycles(&self) -> CycleCount {

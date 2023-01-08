@@ -5,14 +5,13 @@ use crate::{
     bus::CPU_RAM_SIZE,
     cpu::{flags::CpuFlags, CpuState},
 };
-pub use step_state::StepState;
-
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;
 use std::{
     cell::RefCell,
     sync::mpsc::{Receiver, Sender},
 };
+pub use step_state::StepState;
 
 pub struct CpuDebugger {
     span: tracing::Span,
@@ -42,9 +41,11 @@ impl CpuDebugger {
     ) -> Self {
         let mut mem_viewer_options =
             egui_memory_editor::option_data::MemoryEditorOptions::default();
+
         mem_viewer_options.show_ascii = false;
         mem_viewer_options.is_options_collapsed = true;
-        mem_viewer_options.column_count = 32;
+        mem_viewer_options.column_count = 24;
+
         let highlight_text_colour = mem_viewer_options.highlight_text_colour;
         let memory_viewer = MemoryEditor::new()
             .with_options(mem_viewer_options)

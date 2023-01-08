@@ -35,8 +35,8 @@ impl Default for Mask {
     }
 }
 
-impl Mask {
-    pub fn update(&mut self, value: u8) {
-        Self::from_bits_truncate(value);
+impl From<u8> for Mask {
+    fn from(val: u8) -> Self {
+        Self::from_bits_truncate(val)
     }
 }

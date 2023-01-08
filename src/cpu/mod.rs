@@ -150,8 +150,9 @@ impl Cpu {
             memory: self.bus.cpu_ram,
         };
 
+        // TODO: this is a hack
         if instr.name == "BRK" {
-            // TODO: this is a hack
+            tracing::error!("unimplemented BRK instruction encountered");
             return None;
         }
 

@@ -25,13 +25,13 @@ pub struct Ppu {
 
     control: registers::Control,
     mask: registers::Mask,
-    status: registers::Status,
+    pub status: registers::Status,
     scroll: registers::Scroll,
     address: registers::Address,
 
     cycles: CycleCount,
     scanline: ScanlineCount,
-    pub trigger_nmi: bool,
+    trigger_nmi: bool,
 }
 
 impl Ppu {
@@ -95,11 +95,13 @@ impl Ppu {
         result
     }
 
+    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
         let bank = self.control.bg_pattern_bank_addr();
         self.renderer
             .render_bg(bank, &self.character_rom, &self.vram);
         self.renderer.update();
+        tracing::info!("rendering frame");
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
@@ -124,10 +126,14 @@ impl Ppu {
 
     fn write_control(&mut self, data: u8) {
         let nmi_before = self.control.nmi_at_vblank();
-        self.control.update(data);
+        self.control = registers::Control::from(data);
         if !nmi_before && self.status.in_vblank() && self.control.nmi_at_vblank() {
             self.trigger_nmi = true;
         }
+    }
+
+    fn write_mask(&mut self, data: u8) {
+        self.mask = registers::Mask::from(data);
     }
 
     /// Helper for reading from PPUDATA
@@ -201,7 +207,7 @@ impl Ppu {
     pub fn write_register(&mut self, register: &Register, data: u8) {
         match register {
             Register::Control => self.write_control(data),
-            Register::Mask => self.mask.update(data),
+            Register::Mask => self.write_mask(data),
             Register::ObjectAttributeAddress => self.oam.write_address(data),
             Register::ObjectAttributeData => self.oam.write_data(data),
             Register::Scroll => self.scroll.update(data),
@@ -252,7 +258,6 @@ impl Clock for Ppu {
                 if self.control.nmi_at_vblank() {
                     self.trigger_nmi = true;
                 }
-                self.render();
             }
 
             if self.scanline > SCANLINES_PER_FRAME {
