@@ -92,7 +92,7 @@ impl Bus {
 }
 
 impl Memory for Bus {
-    #[tracing::instrument(skip(self, address), parent = &self.span, level = tracing::Level::TRACE)]
+    #[tracing::instrument(skip(self, address), parent = &self.span)]
     fn read_byte(&mut self, address: u16) -> u8 {
         if PROGRAM_ROM_RANGE.contains(&address) {
             let addr = (address - PROGRAM_ROM_RANGE.start()) % 0x4000;

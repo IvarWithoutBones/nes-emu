@@ -1,7 +1,6 @@
-use std::ops::RangeInclusive;
-use std::sync::mpsc::Sender;
-
 use super::Ppu;
+use std::ops::Range;
+use std::sync::mpsc::Sender;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
@@ -19,6 +18,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    const PIXELS_PER_ROW: usize = 8;
+
     pub fn new(pixel_sender: Sender<Box<PixelBuffer>>) -> Self {
         Self {
             pixels: Box::new([0; pixel_buffer_len()]),
@@ -43,27 +44,16 @@ impl Renderer {
         self.pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
-    pub const fn to_tile_range(bank: usize, tile_index: usize) -> RangeInclusive<usize> {
-        let start = bank + tile_index * 16;
-        let end = start + 15;
-        start..=end
-    }
+    fn draw_tile(&mut self, tile: &[u8], x: usize, y: usize) {
+        const BETWEEN_PLANES: usize = 8;
 
-    fn render_tile(&mut self, tile: &[u8], x_offset: usize, y_offset: usize) {
-        const TILE_SIZE: usize = 8;
-        const OFFSET_BETWEEN_PLANES: usize = 8;
+        for y_offset in 0..Self::PIXELS_PER_ROW {
+            let mut upper_plane = tile[y_offset];
+            let mut lower_plane = tile[y_offset + BETWEEN_PLANES];
 
-        for y in 0..TILE_SIZE {
-            // A row of 8x8 pixels
-            let mut upper_plane = tile[y];
-            let mut lower_plane = tile[y + OFFSET_BETWEEN_PLANES];
-
-            for x in (0..TILE_SIZE).rev() {
-                // Combine the highes bit of the upper and lower plane to get the color index (0-3)
-                let value = (1 & upper_plane) << 1 | (1 & lower_plane);
-
+            for x_offset in (0..Self::PIXELS_PER_ROW).rev() {
                 // TODO: use palette correctly
-                let rgb = match value {
+                let rgb = match Self::to_color_index(upper_plane, lower_plane) {
                     0 => SYSTEM_PALLETE[0x01],
                     1 => SYSTEM_PALLETE[0x23],
                     2 => SYSTEM_PALLETE[0x27],
@@ -71,13 +61,41 @@ impl Renderer {
                     _ => unreachable!(),
                 };
 
-                // Shift the planes to the right to get the next pixel
-                upper_plane = upper_plane >> 1;
-                lower_plane = lower_plane >> 1;
+                self.set_pixel(x + x_offset, y + y_offset, rgb);
 
-                self.set_pixel(x_offset + x, y_offset + y, rgb);
+                // Loop over the color indices for each pixel
+                upper_plane >>= 1;
+                lower_plane >>= 1;
             }
         }
+    }
+
+    pub fn draw_background(&mut self, bank: usize, chr_rom: &Vec<u8>, vram: &[u8; Ppu::VRAM_SIZE]) {
+        const ROWS_PER_NAMETABLE: usize = 30;
+        const TILES_PER_ROW: usize = 32;
+
+        // TODO: Assuming first nametable
+        for i in 0..(ROWS_PER_NAMETABLE * TILES_PER_ROW) {
+            let x = (i % TILES_PER_ROW) * Self::PIXELS_PER_ROW;
+            let y = (i / TILES_PER_ROW) * Self::PIXELS_PER_ROW;
+            let tile_index = vram[i] as usize;
+            let tile = &chr_rom[Self::to_tile_range(bank, tile_index)];
+
+            self.draw_tile(tile, x, y);
+            tracing::trace!("drawing tile {} at {},{} ({})", tile_index, x, y, i);
+        }
+    }
+
+    const fn to_tile_range(bank: usize, tile_index: usize) -> Range<usize> {
+        const TILE_LEN: usize = 16;
+        let start = bank + (tile_index * TILE_LEN);
+        let end = start + TILE_LEN;
+        start..end
+    }
+
+    const fn to_color_index(upper_plane: u8, lower_plane: u8) -> u8 {
+        // Combine the two to get a 2-bit color index (0-3)
+        (1 & upper_plane) << 1 | (1 & lower_plane)
     }
 
     // For the debugger in the future
@@ -97,20 +115,8 @@ impl Renderer {
             }
 
             let tile = &character_rom[Self::to_tile_range(bank, tile_index)];
-            self.render_tile(tile, x_offset, y_offset);
+            self.draw_tile(tile, x_offset, y_offset);
             x_offset += 10;
-        }
-    }
-
-    pub fn render_bg(&mut self, bank: usize, chr_rom: &Vec<u8>, vram: &[u8; Ppu::VRAM_SIZE]) {
-        // TODO: Assuming first nametable
-        for i in 0..0x03c0 {
-            let tile_index = vram[i] as usize;
-            let tile = &chr_rom[Self::to_tile_range(bank, tile_index)];
-            let x = (i % 32) * 8;
-            let y = (i / 32) * 8;
-            // tracing::info!("rendering tile {} at {},{}", tile_index, x, y);
-            self.render_tile(tile, x, y);
         }
     }
 }

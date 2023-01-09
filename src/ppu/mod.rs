@@ -99,7 +99,7 @@ impl Ppu {
     pub fn render(&mut self) {
         let bank = self.control.bg_pattern_bank_addr();
         self.renderer
-            .render_bg(bank, &self.character_rom, &self.vram);
+            .draw_background(bank, &self.character_rom, &self.vram);
         self.renderer.update();
         tracing::info!("rendering frame");
     }
@@ -144,16 +144,16 @@ impl Ppu {
 
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             let result = self.character_rom[addr as usize];
-            tracing::info!("pattern table read at ${:04X}: ${:02X}", addr, result);
+            tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
             return self.update_data_buffer(result);
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
             let result = self.vram[self.mirror_nametable(addr) as usize];
-            tracing::info!("nametable read at ${:04X}: ${:02X}", addr, result);
+            tracing::debug!("nametable read at ${:04X}: ${:02X}", addr, result);
             return self.update_data_buffer(result);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             // TODO: This should set the data buffer to the nametable "below" the pattern table
             let result = self.palette_table[self.mirror_palette_table(addr)];
-            tracing::info!("palette RAM read at ${:04X}: ${:02X}", addr, result);
+            tracing::debug!("palette RAM read at ${:04X}: ${:02X}", addr, result);
             return result;
         } else {
             tracing::error!("invalid data read at ${:04X}", addr);
@@ -166,22 +166,23 @@ impl Ppu {
     fn write_data(&mut self, data: u8) {
         let addr = self.address.value;
 
-        if Self::PATTERN_TABLE_RANGE.contains(&addr) {
+        if Self::NAMETABLE_RANGE.contains(&addr) {
+            let vram_index = self.mirror_nametable(addr) as usize;
+            self.vram[vram_index] = data;
+            tracing::info!("nametable write at ${:04X}: ${:02X}", vram_index, data);
+        } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
+            let palette_index = self.mirror_palette_table(addr);
+            self.palette_table[palette_index] = data;
+            tracing::info!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
+        } else if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             tracing::error!(
                 "attempting to write to read-only character ROM at ${:04X}: ${:02X}",
                 addr,
                 data
             );
-        } else if Self::NAMETABLE_RANGE.contains(&addr) {
-            let vram_index = self.mirror_nametable(addr) as usize;
-            tracing::info!("nametable write at ${:04X}: ${:02X}", vram_index, data);
-            self.vram[vram_index] = data;
-        } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
-            let palette_index = self.mirror_palette_table(addr);
-            tracing::info!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
-            self.palette_table[palette_index] = data;
+            panic!()
         } else {
-            tracing::info!("invalid data write at ${:04X}: ${:02X}", addr, data);
+            tracing::error!("invalid data write at ${:04X}: ${:02X}", addr, data);
             panic!()
         }
 
@@ -213,16 +214,8 @@ impl Ppu {
             Register::Scroll => self.scroll.update(data),
             Register::Address => self.address.update(data),
             Register::Data => self.write_data(data),
-            Register::ObjectAttributeDirectMemoryAccess => {
-                tracing::error!(
-                    "invalid addressing for register {}, write of ${:02X}",
-                    register,
-                    data
-                );
-                panic!()
-            }
             _ => {
-                tracing::error!("unimplemented register {} write of ${:02X}", register, data);
+                tracing::error!("invalid register {} write of ${:02X}", register, data);
                 panic!()
             }
         }
@@ -254,17 +247,18 @@ impl Clock for Ppu {
 
             if self.scanline == VBLANK_SCANLINE {
                 self.status.set_vblank();
-                tracing::info!("setting vblank: {}", self.status);
                 if self.control.nmi_at_vblank() {
                     self.trigger_nmi = true;
                 }
+                tracing::debug!("entering vblank, status: {}", self.status);
             }
 
             if self.scanline > SCANLINES_PER_FRAME {
-                // Drawn everything, starting all over again
+                // Drawn every pixel, starting over
                 self.scanline = 0;
                 self.trigger_nmi = false;
                 self.status.reset_vblank();
+                tracing::debug!("finished computing frame");
             }
         }
     }

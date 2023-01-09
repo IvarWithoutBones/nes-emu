@@ -41,6 +41,7 @@ impl Cpu {
 
     const NMI_VECTOR: u16 = 0xFFFA;
     const RESET_VECTOR: u16 = 0xFFFC;
+    pub const BREAK_VECTOR: u16 = 0xFFFE;
 
     pub fn new(bus: Bus) -> Cpu {
         Cpu {
@@ -116,7 +117,7 @@ impl Cpu {
         flags.remove(CpuFlags::Break);
         flags.insert(CpuFlags::Break2);
 
-        self.push_word(self.program_counter); // TODO: any increment?
+        self.push_word(self.program_counter);
         self.push_byte(flags.bits());
 
         self.flags.insert(CpuFlags::InterruptsDisabled);
@@ -150,12 +151,6 @@ impl Cpu {
             memory: self.bus.cpu_ram,
         };
 
-        // TODO: this is a hack
-        if instr.name == "BRK" {
-            tracing::error!("unimplemented BRK instruction encountered");
-            return None;
-        }
-
         let program_counter_prior = self.program_counter;
         (instr.function)(self, mode);
         if self.program_counter == program_counter_prior {
@@ -164,6 +159,11 @@ impl Cpu {
         }
 
         tracing::debug!("{}  {}", self, state.instruction);
+
+        #[cfg(test)]
+        if instr.name == "BRK" {
+            return None;
+        }
 
         self.tick(*cycles as usize);
         Some(Box::new(state))

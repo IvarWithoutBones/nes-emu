@@ -1,4 +1,4 @@
-use crate::bus::{Clock, Memory, CycleCount};
+use crate::bus::{Clock, CycleCount, Memory};
 use crate::cpu::{addressing_mode::AdressingMode, Cpu, CpuFlags};
 
 /// A single instruction, with addressing mode.
@@ -97,7 +97,7 @@ fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
     cpu.program_counter = after_opcode;
 }
 
-/// See https://www.nesdev.org/obelisk-6502-guide/reference.html
+/// https://www.nesdev.org/obelisk-6502-guide/reference.html
 mod instructions {
     use super::*;
 
@@ -109,8 +109,12 @@ mod instructions {
         }
     }
 
-    pub fn brk(_cpu: &mut Cpu, _mode: &AdressingMode) {
-        // TODO: Should execute code from the BRK vector
+    pub fn brk(cpu: &mut Cpu, _mode: &AdressingMode) {
+        cpu.push_word(cpu.program_counter.wrapping_add(1));
+        cpu.push_byte(cpu.flags.bits());
+
+        cpu.program_counter = cpu.read_word(Cpu::BREAK_VECTOR);
+        cpu.flags.insert(CpuFlags::Break);
     }
 
     pub fn jmp(cpu: &mut Cpu, mode: &AdressingMode) {
@@ -483,15 +487,9 @@ mod instructions {
         cpu.stack_pointer = cpu.register_x;
     }
 
-    // Unofficial opcodes
-
-    pub fn lax(cpu: &mut Cpu, mode: &AdressingMode) {
-        let (value, page_crossed) = mode.fetch_param(cpu);
-        cpu.accumulator = value;
-        cpu.register_x = value;
-        cpu.update_zero_and_negative_flags(cpu.accumulator);
-        cpu.tick_once_if(page_crossed);
-    }
+    /*
+        Unofficial/undocumented opcodes
+    */
 
     pub fn sax(cpu: &mut Cpu, mode: &AdressingMode) {
         let addr = mode.fetch_param_address(cpu).0;
@@ -499,97 +497,44 @@ mod instructions {
         cpu.write_byte(addr, result);
     }
 
-    pub fn dcp(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let value = cpu.read_byte(addr).wrapping_sub(1);
-
-        cpu.write_byte(addr, value);
-        cpu.update_zero_and_negative_flags(value);
-
-        cpu.flags.set(CpuFlags::Carry, cpu.accumulator >= value);
-        // Subtract so that we set the ZERO flag if the values are equal
-        cpu.update_zero_and_negative_flags(cpu.accumulator.wrapping_sub(value));
+    pub fn lax(cpu: &mut Cpu, mode: &AdressingMode) {
+        lda(cpu, mode);
+        tax(cpu, mode);
     }
 
-    pub fn isb(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let value = cpu.read_byte(addr).wrapping_add(1);
+    pub fn dcp(cpu: &mut Cpu, mode: &AdressingMode) {
+        dec(cpu, mode);
+        cmp(cpu, mode);
+    }
 
-        let (data, overflow1) = cpu.accumulator.overflowing_sub(value);
-        let (result, overflow2) = data.overflowing_sub(!cpu.flags.contains(CpuFlags::Carry) as u8);
-
-        cpu.flags.set(CpuFlags::Carry, !(overflow1 || overflow2));
-        cpu.update_zero_and_negative_flags(result);
-        cpu.flags.set(
-            CpuFlags::Overflow,
-            (((cpu.accumulator ^ result) & !(value ^ result)) & 0x80) != 0,
-        );
-
-        cpu.accumulator = result;
-        cpu.write_byte(addr, value);
+    pub fn isc(cpu: &mut Cpu, mode: &AdressingMode) {
+        inc(cpu, mode);
+        sbc(cpu, mode);
     }
 
     pub fn slo(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let mut value = cpu.read_byte(addr);
-
-        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
-        value <<= 1;
-
-        cpu.write_byte(addr, value);
-        cpu.accumulator |= value;
-        cpu.update_zero_and_negative_flags(cpu.accumulator);
+        asl(cpu, mode);
+        ora(cpu, mode);
     }
 
     pub fn rla(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let mut value = cpu.read_byte(addr);
-
-        let carry = cpu.flags.contains(CpuFlags::Carry);
-        let rotate_left = |value: u8| (value << 1) | carry as u8;
-
-        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
-        value = rotate_left(value);
-        cpu.write_byte(addr, value);
-
-        cpu.accumulator &= value;
-        cpu.update_zero_and_negative_flags(cpu.accumulator);
+        rol(cpu, mode);
+        and(cpu, mode);
     }
 
     pub fn sre(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let mut value = cpu.read_byte(addr);
-
-        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
-        value >>= 1;
-        cpu.write_byte(addr, value);
-
-        cpu.accumulator ^= value;
-        cpu.update_zero_and_negative_flags(cpu.accumulator);
+        lsr(cpu, mode);
+        eor(cpu, mode);
     }
 
     pub fn rra(cpu: &mut Cpu, mode: &AdressingMode) {
-        let addr = mode.fetch_param_address(cpu).0;
-        let mut value = cpu.read_byte(addr);
+        ror(cpu, mode);
+        adc(cpu, mode);
+    }
 
-        let carry = cpu.flags.contains(CpuFlags::Carry);
-        let rotate_right = |value: u8| (value >> 1) | ((carry as u8) << 7);
-
-        cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
-        value = rotate_right(value);
-        cpu.write_byte(addr, value);
-
-        let (data, overflow1) = cpu.accumulator.overflowing_add(value);
-        let (result, overflow2) = data.overflowing_add(cpu.flags.contains(CpuFlags::Carry) as u8);
-
-        cpu.flags.set(CpuFlags::Carry, overflow1 || overflow2);
-        cpu.update_zero_and_negative_flags(result);
-        cpu.flags.set(
-            CpuFlags::Overflow,
-            (((cpu.accumulator ^ result) & (value ^ result)) & 0x80) != 0,
-        );
-
-        cpu.accumulator = result;
+    pub fn alr(cpu: &mut Cpu, mode: &AdressingMode) {
+        and(cpu, mode);
+        lsr(cpu, &AdressingMode::Accumulator);
     }
 }
 
@@ -609,7 +554,7 @@ macro_rules! instr {
 }
 
 #[rustfmt::skip]
-const INSTRUCTIONS: [Instruction; 64] = [
+const INSTRUCTIONS: [Instruction; 65] = [
     instr!("BRK", instructions::brk, (0x00, 7, &AdressingMode::Implied)),
     instr!("RTI", instructions::rti, (0x40, 6, &AdressingMode::Implied)),
 
@@ -633,7 +578,10 @@ const INSTRUCTIONS: [Instruction; 64] = [
     instr!("TAX", instructions::tax, (0xAA, 2, &AdressingMode::Implied)),
     instr!("TAY", instructions::tay, (0xA8, 2, &AdressingMode::Implied)),
     instr!("TXA", instructions::txa, (0x8A, 2, &AdressingMode::Implied)),
-    instr!("TYA", instructions::tya, (0x98, 2, &AdressingMode::Implied)),
+    instr!("TYA", instructions::tya,
+        (0x98, 2, &AdressingMode::Implied),
+        (0x89, 2, &AdressingMode::Implied)
+    ),
 
     instr!("JSR", instructions::jsr, (0x20, 6, &AdressingMode::Absolute)),
     instr!("RTS", instructions::rts, (0x60, 6, &AdressingMode::Implied)),
@@ -888,7 +836,7 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0xD3, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("ISB", instructions::isb,
+    instr!("ISC", instructions::isc,
         (0xE7, 5, &AdressingMode::ZeroPage),
         (0xF7, 6, &AdressingMode::ZeroPageX),
         (0xEF, 6, &AdressingMode::Absolute),
@@ -936,5 +884,9 @@ const INSTRUCTIONS: [Instruction; 64] = [
         (0x7B, 7, &AdressingMode::AbsoluteY),
         (0x63, 8, &AdressingMode::IndirectX),
         (0x73, 8, &AdressingMode::IndirectY)
+    ),
+
+    instr!("ALR", instructions::alr,
+        (0x4B, 2, &AdressingMode::Immediate)
     )
 ];

@@ -48,8 +48,8 @@ impl ObjectAttributeMemory {
         // Convert to a page index: $XX -> $XX00
         let begin = ((addr as u16) << 8) as usize;
         let end = begin + Self::MEMORY_SIZE;
-        tracing::info!(
-            "DMA transfer from ${:04X}..=${:04X}, copying into ${:02X}",
+        tracing::debug!(
+            "DMA transfer from ${:04X}..${:04X}, starting at DMA ${:02X}",
             begin,
             end,
             self.address
