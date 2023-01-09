@@ -155,7 +155,7 @@ impl Cpu {
         (instr.function)(self, mode);
         if self.program_counter == program_counter_prior {
             // Some instructions (e.g. JMP) set the program counter themselves
-            self.program_counter += mode.len();
+            self.program_counter = self.program_counter.wrapping_add(mode.len());
         }
 
         tracing::debug!("{}  {}", self, state.instruction);

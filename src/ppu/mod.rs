@@ -99,7 +99,7 @@ impl Ppu {
     pub fn render(&mut self) {
         let bank = self.control.bg_pattern_bank_addr();
         self.renderer
-            .draw_background(bank, &self.character_rom, &self.vram);
+            .draw_background(bank, &self.character_rom, &self.palette_table, &self.vram);
         self.renderer.update();
         tracing::info!("rendering frame");
     }

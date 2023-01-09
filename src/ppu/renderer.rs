@@ -18,8 +18,6 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    const PIXELS_PER_ROW: usize = 8;
-
     pub fn new(pixel_sender: Sender<Box<PixelBuffer>>) -> Self {
         Self {
             pixels: Box::new([0; pixel_buffer_len()]),
@@ -44,24 +42,23 @@ impl Renderer {
         self.pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
-    fn draw_tile(&mut self, tile: &[u8], x: usize, y: usize) {
+    fn draw_tile(&mut self, tile: &[u8], palette: [u8; 4], x: usize, y: usize) {
         const BETWEEN_PLANES: usize = 8;
+        const PIXELS_PER_ROW: usize = 8;
 
-        for y_offset in 0..Self::PIXELS_PER_ROW {
-            let mut upper_plane = tile[y_offset];
-            let mut lower_plane = tile[y_offset + BETWEEN_PLANES];
+        for y_offset in 0..PIXELS_PER_ROW {
+            let mut lower_plane = tile[y_offset];
+            let mut upper_plane = tile[y_offset + BETWEEN_PLANES];
 
-            for x_offset in (0..Self::PIXELS_PER_ROW).rev() {
-                // TODO: use palette correctly
-                let rgb = match Self::to_color_index(upper_plane, lower_plane) {
-                    0 => SYSTEM_PALLETE[0x01],
-                    1 => SYSTEM_PALLETE[0x23],
-                    2 => SYSTEM_PALLETE[0x27],
-                    3 => SYSTEM_PALLETE[0x30],
-                    _ => unreachable!(),
-                };
+            for x_offset in (0..PIXELS_PER_ROW).rev() {
+                let rgb = SYSTEM_PALLETE
+                    [palette[Self::to_color_index(upper_plane, lower_plane) as usize] as usize];
 
-                self.set_pixel(x + x_offset, y + y_offset, rgb);
+                self.set_pixel(
+                    (x * PIXELS_PER_ROW) + x_offset,
+                    (y * PIXELS_PER_ROW) + y_offset,
+                    rgb,
+                );
 
                 // Loop over the color indices for each pixel
                 upper_plane >>= 1;
@@ -70,18 +67,48 @@ impl Renderer {
         }
     }
 
-    pub fn draw_background(&mut self, bank: usize, chr_rom: &Vec<u8>, vram: &[u8; Ppu::VRAM_SIZE]) {
+    fn fetch_bg_palette(
+        vram: &[u8; Ppu::VRAM_SIZE],
+        palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE],
+        nametable_offset: usize,
+        x: usize,
+        y: usize,
+    ) -> [u8; 4] {
+        // The attribute table is an 8x8 byte array containing palette table indices.
+        // Each byte represents a 2x2 tile area in the nametable.
+        let attr_index = ((y / 4) * 8) + (x / 4);
+        let attr_byte = vram[nametable_offset + attr_index];
+        let palette_start = Self::to_palette_start(Quadrant::from((x, y)), attr_byte);
+
+        [
+            palette_table[0], // Background color
+            palette_table[palette_start],
+            palette_table[palette_start + 1],
+            palette_table[palette_start + 2],
+        ]
+    }
+
+    pub fn draw_background(
+        &mut self,
+        bank: usize,
+        chr_rom: &Vec<u8>,
+        palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE],
+        vram: &[u8; Ppu::VRAM_SIZE],
+    ) {
         const ROWS_PER_NAMETABLE: usize = 30;
         const TILES_PER_ROW: usize = 32;
-
         // TODO: Assuming first nametable
-        for i in 0..(ROWS_PER_NAMETABLE * TILES_PER_ROW) {
-            let x = (i % TILES_PER_ROW) * Self::PIXELS_PER_ROW;
-            let y = (i / TILES_PER_ROW) * Self::PIXELS_PER_ROW;
+        let nametable_offset = ROWS_PER_NAMETABLE * TILES_PER_ROW;
+
+        for i in 0..nametable_offset {
+            let y = i / TILES_PER_ROW;
+            let x = i % TILES_PER_ROW;
+
             let tile_index = vram[i] as usize;
             let tile = &chr_rom[Self::to_tile_range(bank, tile_index)];
+            let palette = Self::fetch_bg_palette(vram, palette_table, nametable_offset, x, y);
 
-            self.draw_tile(tile, x, y);
+            self.draw_tile(tile, palette, x, y);
             tracing::trace!("drawing tile {} at {},{} ({})", tile_index, x, y, i);
         }
     }
@@ -95,28 +122,58 @@ impl Renderer {
 
     const fn to_color_index(upper_plane: u8, lower_plane: u8) -> u8 {
         // Combine the two to get a 2-bit color index (0-3)
-        (1 & upper_plane) << 1 | (1 & lower_plane)
+        ((1 & upper_plane) << 1) | (1 & lower_plane)
+    }
+
+    const fn to_palette_start(quad: Quadrant, attr: u8) -> usize {
+        let palette_index = (attr >> quad as u8) & 0b11;
+        ((palette_index as usize) * 4) + 1
     }
 
     // For the debugger in the future
-    #[allow(dead_code)]
-    pub fn show_tiles_in_bank(&mut self, character_rom: &Vec<u8>, bank: usize) {
-        assert!(bank <= 1);
-        const TILES_PER_BANK: usize = 256;
-        const TILES_PER_ROW: usize = 20;
+    // #[allow(dead_code)]
+    // pub fn show_tiles_in_bank(&mut self, character_rom: &Vec<u8>, bank: usize) {
+    //     assert!(bank <= 1);
+    //     const TILES_PER_BANK: usize = 256;
+    //     const TILES_PER_ROW: usize = 20;
+    //
+    //     let mut y_offset = 0;
+    //     let mut x_offset = 0;
+    //     for tile_index in 0..TILES_PER_BANK {
+    //         // Scroll to the next row if needed
+    //         if tile_index != 0 && tile_index % TILES_PER_ROW == 0 {
+    //             y_offset += 10;
+    //             x_offset = 0;
+    //         }
+    //
+    //         let tile = &character_rom[Self::to_tile_range(bank, tile_index)];
+    //         self.draw_tile(tile, x_offset, y_offset);
+    //         x_offset += 10;
+    //     }
+    // }
+}
 
-        let mut y_offset = 0;
-        let mut x_offset = 0;
-        for tile_index in 0..TILES_PER_BANK {
-            // Scroll to the next row if needed
-            if tile_index != 0 && tile_index % TILES_PER_ROW == 0 {
-                y_offset += 10;
-                x_offset = 0;
-            }
+/// https://www.nesdev.org/wiki/PPU_attribute_tables
+#[repr(u8)]
+enum Quadrant {
+    TopLeft = 0,
+    TopRight = 2,
+    BottomLeft = 4,
+    BottomRight = 6,
+}
 
-            let tile = &character_rom[Self::to_tile_range(bank, tile_index)];
-            self.draw_tile(tile, x_offset, y_offset);
-            x_offset += 10;
+impl From<(usize, usize)> for Quadrant {
+    fn from(mut location: (usize, usize)) -> Self {
+        // Normalize the location to an 8x8 grid
+        location.0 = (location.0 % 4) / 2;
+        location.1 = (location.1 % 4) / 2;
+
+        match location {
+            (0, 0) => Quadrant::TopLeft,
+            (1, 0) => Quadrant::TopRight,
+            (0, 1) => Quadrant::BottomLeft,
+            (1, 1) => Quadrant::BottomRight,
+            (_, _) => unreachable!(),
         }
     }
 }

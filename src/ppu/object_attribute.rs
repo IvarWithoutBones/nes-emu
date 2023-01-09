@@ -18,7 +18,7 @@ impl Default for ObjectAttributeMemory {
 }
 
 impl ObjectAttributeMemory {
-    const MEMORY_SIZE: usize = 0xFF;
+    const MEMORY_SIZE: usize = 0x100;
 
     #[tracing::instrument(skip(self, data), parent = &self.span)]
     pub fn write_address(&mut self, data: u8) {
@@ -56,8 +56,7 @@ impl ObjectAttributeMemory {
         );
 
         for byte in fetch_buf(begin..end) {
-            self.memory[self.address as usize] = byte;
-            self.address = self.address.wrapping_add(1);
+            self.write_data(byte);
         }
     }
 }
