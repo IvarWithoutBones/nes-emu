@@ -3,7 +3,7 @@ use crate::cpu::Cpu;
 use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AdressingMode {
     Implied,
     Relative,
@@ -22,10 +22,7 @@ pub enum AdressingMode {
 
 impl AdressingMode {
     pub const fn has_arguments(&self) -> bool {
-        match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => false,
-            _ => true,
-        }
+        !matches!(self, AdressingMode::Implied | AdressingMode::Accumulator)
     }
 
     /// The length of an instruction, counting the identifier and arguments

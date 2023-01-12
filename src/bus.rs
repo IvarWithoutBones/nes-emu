@@ -64,7 +64,7 @@ impl Bus {
         }
     }
 
-    pub fn new(pixel_sender: Sender<Box<PixelBuffer>>, rom_data: &Vec<u8>) -> Self {
+    pub fn new(pixel_sender: Sender<Box<PixelBuffer>>, rom_data: &[u8]) -> Self {
         // Should the CPU be initialized here as well?
         let cartridge = Cartridge::from_bytes(rom_data).unwrap_or_else(|err| {
             tracing::error!("failed to load cartridge: \"{}\"", err);
@@ -98,16 +98,16 @@ impl Memory for Bus {
             let addr = (address - PROGRAM_ROM_RANGE.start()) % 0x4000;
             let result = self.cartridge.program_rom[addr as usize];
             tracing::trace!("program ROM read at ${:04X}: ${:02X}", addr, result);
-            return result;
+            result
         } else if CPU_RAM_RANGE.contains(&address) {
             let addr = Self::to_cpu_ram_address(address);
             let result = self.cpu_ram[addr];
             tracing::trace!("CPU RAM read at ${:04X}: ${:02X}", addr, result);
-            return result;
+            result
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.readable() {
                 tracing::trace!("PPU register {} read at ${:04X}", register, address);
-                return self.ppu.read_register(register);
+                self.ppu.read_register(register)
             } else {
                 tracing::error!(
                     "reading write-only PPU register {} at ${:04X}",

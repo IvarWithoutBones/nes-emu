@@ -8,8 +8,6 @@ use bus::Bus;
 use clap::Parser;
 use gui::Gui;
 use std::sync::mpsc::channel;
-use tracing;
-use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]

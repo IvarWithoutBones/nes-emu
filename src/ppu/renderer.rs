@@ -91,7 +91,7 @@ impl Renderer {
     pub fn draw_background(
         &mut self,
         bank: usize,
-        chr_rom: &Vec<u8>,
+        chr_rom: &[u8],
         palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE],
         vram: &[u8; Ppu::VRAM_SIZE],
     ) {

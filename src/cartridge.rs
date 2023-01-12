@@ -47,7 +47,7 @@ impl Header {
     const SIGNATURE: [u8; 4] = [b'N', b'E', b'S', 0x1A];
 
     fn new(data: [u8; 16]) -> Result<Self, String> {
-        if &data[0..=3] != Self::SIGNATURE {
+        if data[0..=3] != Self::SIGNATURE {
             return Err("Invalid ROM file".to_string());
         }
 
@@ -112,7 +112,7 @@ impl Cartridge {
     const CHARACTER_ROM_PAGE_SIZE: usize = 8 * 1024;
     const TRAINER_SIZE: usize = 512;
 
-    pub fn from_bytes(data: &Vec<u8>) -> Result<Cartridge, String> {
+    pub fn from_bytes(data: &[u8]) -> Result<Cartridge, String> {
         let _span = tracing::span!(tracing::Level::INFO, Cartridge::SPAN_NAME).entered();
         let header = Header::new(data[..HEADER_SIZE].try_into().unwrap())?;
         let program_rom_size = header.program_rom_pages * Self::PROGRAM_ROM_PAGE_SIZE;

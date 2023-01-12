@@ -40,21 +40,21 @@ impl Instruction {
     /// Format the instruction to a human-readable string, used for debugging
     pub fn format(&self, cpu: &mut Cpu, mode: &AdressingMode) -> String {
         let mut args = String::new();
-        match mode {
-            &AdressingMode::Immediate => {
+        match *mode {
+            AdressingMode::Immediate => {
                 args = format!("#${:02X}", mode.fetch_param(cpu).0);
             }
 
-            &AdressingMode::Relative => {
+            AdressingMode::Relative => {
                 // TODO: this is hacky, instructions seem to work fine though
                 args = format!("${:02X}", mode.fetch_param_address(cpu).0.wrapping_add(1));
             }
 
-            &AdressingMode::ZeroPage => {
+            AdressingMode::ZeroPage => {
                 args = format!("${:02X}", mode.fetch_param_address(cpu).0);
             }
 
-            &AdressingMode::Accumulator => {
+            AdressingMode::Accumulator => {
                 args = "A".to_string();
             }
 
@@ -98,7 +98,7 @@ fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
 }
 
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
-mod instructions {
+mod instruction_impls {
     use super::*;
 
     pub fn nop(cpu: &mut Cpu, mode: &AdressingMode) {
@@ -555,44 +555,44 @@ macro_rules! instr {
 
 #[rustfmt::skip]
 const INSTRUCTIONS: [Instruction; 65] = [
-    instr!("BRK", instructions::brk, (0x00, 7, &AdressingMode::Implied)),
-    instr!("RTI", instructions::rti, (0x40, 6, &AdressingMode::Implied)),
+    instr!("BRK", instruction_impls::brk, (0x00, 7, &AdressingMode::Implied)),
+    instr!("RTI", instruction_impls::rti, (0x40, 6, &AdressingMode::Implied)),
 
-    instr!("BCS", instructions::bcs, (0xB0, 2, &AdressingMode::Relative)),
-    instr!("BCC", instructions::bcc, (0x90, 2, &AdressingMode::Relative)),
-    instr!("BEQ", instructions::beq, (0xF0, 2, &AdressingMode::Relative)),
-    instr!("BNE", instructions::bne, (0xD0, 2, &AdressingMode::Relative)),
-    instr!("BMI", instructions::bmi, (0x30, 2, &AdressingMode::Relative)),
-    instr!("BPL", instructions::bpl, (0x10, 2, &AdressingMode::Relative)),
-    instr!("BVS", instructions::bvs, (0x70, 2, &AdressingMode::Relative)),
-    instr!("BVC", instructions::bvc, (0x50, 2, &AdressingMode::Relative)),
+    instr!("BCS", instruction_impls::bcs, (0xB0, 2, &AdressingMode::Relative)),
+    instr!("BCC", instruction_impls::bcc, (0x90, 2, &AdressingMode::Relative)),
+    instr!("BEQ", instruction_impls::beq, (0xF0, 2, &AdressingMode::Relative)),
+    instr!("BNE", instruction_impls::bne, (0xD0, 2, &AdressingMode::Relative)),
+    instr!("BMI", instruction_impls::bmi, (0x30, 2, &AdressingMode::Relative)),
+    instr!("BPL", instruction_impls::bpl, (0x10, 2, &AdressingMode::Relative)),
+    instr!("BVS", instruction_impls::bvs, (0x70, 2, &AdressingMode::Relative)),
+    instr!("BVC", instruction_impls::bvc, (0x50, 2, &AdressingMode::Relative)),
 
-    instr!("CLV", instructions::clv, (0xB8, 2, &AdressingMode::Implied)),
-    instr!("CLC", instructions::clc, (0x18, 2, &AdressingMode::Implied)),
-    instr!("CLD", instructions::cld, (0xD8, 2, &AdressingMode::Implied)),
-    instr!("CLI", instructions::cli, (0x58, 2, &AdressingMode::Implied)),
-    instr!("SEC", instructions::sec, (0x38, 2, &AdressingMode::Implied)),
-    instr!("SED", instructions::sed, (0xF8, 2, &AdressingMode::Implied)),
-    instr!("SEI", instructions::sei, (0x78, 2, &AdressingMode::Implied)),
+    instr!("CLV", instruction_impls::clv, (0xB8, 2, &AdressingMode::Implied)),
+    instr!("CLC", instruction_impls::clc, (0x18, 2, &AdressingMode::Implied)),
+    instr!("CLD", instruction_impls::cld, (0xD8, 2, &AdressingMode::Implied)),
+    instr!("CLI", instruction_impls::cli, (0x58, 2, &AdressingMode::Implied)),
+    instr!("SEC", instruction_impls::sec, (0x38, 2, &AdressingMode::Implied)),
+    instr!("SED", instruction_impls::sed, (0xF8, 2, &AdressingMode::Implied)),
+    instr!("SEI", instruction_impls::sei, (0x78, 2, &AdressingMode::Implied)),
 
-    instr!("TAX", instructions::tax, (0xAA, 2, &AdressingMode::Implied)),
-    instr!("TAY", instructions::tay, (0xA8, 2, &AdressingMode::Implied)),
-    instr!("TXA", instructions::txa, (0x8A, 2, &AdressingMode::Implied)),
-    instr!("TYA", instructions::tya,
+    instr!("TAX", instruction_impls::tax, (0xAA, 2, &AdressingMode::Implied)),
+    instr!("TAY", instruction_impls::tay, (0xA8, 2, &AdressingMode::Implied)),
+    instr!("TXA", instruction_impls::txa, (0x8A, 2, &AdressingMode::Implied)),
+    instr!("TYA", instruction_impls::tya,
         (0x98, 2, &AdressingMode::Implied),
         (0x89, 2, &AdressingMode::Implied)
     ),
 
-    instr!("JSR", instructions::jsr, (0x20, 6, &AdressingMode::Absolute)),
-    instr!("RTS", instructions::rts, (0x60, 6, &AdressingMode::Implied)),
-    instr!("PHP", instructions::php, (0x08, 3, &AdressingMode::Implied)),
-    instr!("PLP", instructions::plp, (0x28, 4, &AdressingMode::Implied)),
-    instr!("PHA", instructions::pha, (0x48, 3, &AdressingMode::Implied)),
-    instr!("PLA", instructions::pla, (0x68, 4, &AdressingMode::Implied)),
-    instr!("TSX", instructions::tsx, (0xBA, 2, &AdressingMode::Implied)),
-    instr!("TXS", instructions::txs, (0x9A, 2, &AdressingMode::Implied)),
+    instr!("JSR", instruction_impls::jsr, (0x20, 6, &AdressingMode::Absolute)),
+    instr!("RTS", instruction_impls::rts, (0x60, 6, &AdressingMode::Implied)),
+    instr!("PHP", instruction_impls::php, (0x08, 3, &AdressingMode::Implied)),
+    instr!("PLP", instruction_impls::plp, (0x28, 4, &AdressingMode::Implied)),
+    instr!("PHA", instruction_impls::pha, (0x48, 3, &AdressingMode::Implied)),
+    instr!("PLA", instruction_impls::pla, (0x68, 4, &AdressingMode::Implied)),
+    instr!("TSX", instruction_impls::tsx, (0xBA, 2, &AdressingMode::Implied)),
+    instr!("TXS", instruction_impls::txs, (0x9A, 2, &AdressingMode::Implied)),
 
-    instr!("NOP", instructions::nop,
+    instr!("NOP", instruction_impls::nop,
         (0x80, 2, &AdressingMode::Immediate),
         (0x0C, 4, &AdressingMode::Absolute),
         (0x1C, 4, &AdressingMode::AbsoluteX),
@@ -620,35 +620,35 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xF4, 4, &AdressingMode::ZeroPageX)
     ),
 
-    instr!("BIT", instructions::bit,
+    instr!("BIT", instruction_impls::bit,
         (0x24, 3, &AdressingMode::ZeroPage),
         (0x2C, 4, &AdressingMode::Absolute)
     ),
 
-    instr!("JMP", instructions::jmp,
+    instr!("JMP", instruction_impls::jmp,
         (0x4C, 3, &AdressingMode::Absolute),
         (0x6C, 5, &AdressingMode::Indirect)
     ),
 
-    instr!("INX", instructions::inx, (0xE8, 2, &AdressingMode::Implied)),
-    instr!("INY", instructions::iny, (0xC8, 2, &AdressingMode::Implied)),
-    instr!("INC", instructions::inc,
+    instr!("INX", instruction_impls::inx, (0xE8, 2, &AdressingMode::Implied)),
+    instr!("INY", instruction_impls::iny, (0xC8, 2, &AdressingMode::Implied)),
+    instr!("INC", instruction_impls::inc,
         (0xE6, 5, &AdressingMode::ZeroPage),
         (0xF6, 6, &AdressingMode::ZeroPageX),
         (0xEE, 6, &AdressingMode::Absolute),
         (0xFE, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("DEX", instructions::dex, (0xCA, 2, &AdressingMode::Implied)),
-    instr!("DEY", instructions::dey, (0x88, 2, &AdressingMode::Implied)),
-    instr!("DEC", instructions::dec,
+    instr!("DEX", instruction_impls::dex, (0xCA, 2, &AdressingMode::Implied)),
+    instr!("DEY", instruction_impls::dey, (0x88, 2, &AdressingMode::Implied)),
+    instr!("DEC", instruction_impls::dec,
         (0xC6, 5, &AdressingMode::ZeroPage),
         (0xD6, 6, &AdressingMode::ZeroPageX),
         (0xCE, 6, &AdressingMode::Absolute),
         (0xDE, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("ADC", instructions::adc,
+    instr!("ADC", instruction_impls::adc,
         (0x69, 2, &AdressingMode::Immediate),
         (0x65, 3, &AdressingMode::ZeroPage),
         (0x75, 4, &AdressingMode::ZeroPageX),
@@ -659,7 +659,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x71, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("SBC", instructions::sbc,
+    instr!("SBC", instruction_impls::sbc,
         (0xE9, 2, &AdressingMode::Immediate),
         (0xEB, 2, &AdressingMode::Immediate), // Undocumented
         (0xE5, 3, &AdressingMode::ZeroPage),
@@ -671,7 +671,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xF1, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("LSR", instructions::lsr,
+    instr!("LSR", instruction_impls::lsr,
         (0x4A, 2, &AdressingMode::Accumulator),
         (0x46, 5, &AdressingMode::ZeroPage),
         (0x56, 6, &AdressingMode::ZeroPageX),
@@ -679,7 +679,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x5E, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("ASL", instructions::asl,
+    instr!("ASL", instruction_impls::asl,
         (0x0A, 2, &AdressingMode::Accumulator),
         (0x06, 5, &AdressingMode::ZeroPage),
         (0x16, 6, &AdressingMode::ZeroPageX),
@@ -687,7 +687,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x1E, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("ROL", instructions::rol,
+    instr!("ROL", instruction_impls::rol,
         (0x2A, 2, &AdressingMode::Accumulator),
         (0x26, 5, &AdressingMode::ZeroPage),
         (0x36, 6, &AdressingMode::ZeroPageX),
@@ -695,7 +695,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x3E, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("ROR", instructions::ror,
+    instr!("ROR", instruction_impls::ror,
         (0x6A, 2, &AdressingMode::Accumulator),
         (0x66, 5, &AdressingMode::ZeroPage),
         (0x76, 6, &AdressingMode::ZeroPageX),
@@ -703,7 +703,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x7E, 7, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("AND", instructions::and,
+    instr!("AND", instruction_impls::and,
         (0x29, 2, &AdressingMode::Immediate),
         (0x25, 3, &AdressingMode::ZeroPage),
         (0x35, 4, &AdressingMode::ZeroPageX),
@@ -714,7 +714,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x31, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("EOR", instructions::eor,
+    instr!("EOR", instruction_impls::eor,
         (0x49, 2, &AdressingMode::Immediate),
         (0x45, 3, &AdressingMode::ZeroPage),
         (0x55, 4, &AdressingMode::ZeroPageX),
@@ -725,7 +725,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x51, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("ORA", instructions::ora,
+    instr!("ORA", instruction_impls::ora,
         (0x09, 2, &AdressingMode::Immediate),
         (0x05, 3, &AdressingMode::ZeroPage),
         (0x15, 4, &AdressingMode::ZeroPageX),
@@ -736,7 +736,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x11, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("CMP", instructions::cmp,
+    instr!("CMP", instruction_impls::cmp,
         (0xC9, 2, &AdressingMode::Immediate),
         (0xC5, 3, &AdressingMode::ZeroPage),
         (0xD5, 4, &AdressingMode::ZeroPageX),
@@ -747,19 +747,19 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xD1, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("CPX", instructions::cpx,
+    instr!("CPX", instruction_impls::cpx,
         (0xE0, 2, &AdressingMode::Immediate),
         (0xE4, 3, &AdressingMode::ZeroPage),
         (0xEC, 4, &AdressingMode::Absolute)
     ),
 
-    instr!("CPY", instructions::cpy,
+    instr!("CPY", instruction_impls::cpy,
         (0xC0, 2, &AdressingMode::Immediate),
         (0xC4, 3, &AdressingMode::ZeroPage),
         (0xCC, 4, &AdressingMode::Absolute)
     ),
 
-    instr!("LDA", instructions::lda,
+    instr!("LDA", instruction_impls::lda,
         (0xA9, 2, &AdressingMode::Immediate),
         (0xA5, 3, &AdressingMode::ZeroPage),
         (0xB5, 4, &AdressingMode::ZeroPageX),
@@ -770,7 +770,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xB1, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("LDX", instructions::ldx,
+    instr!("LDX", instruction_impls::ldx,
         (0xA2, 2, &AdressingMode::Immediate),
         (0xA6, 3, &AdressingMode::ZeroPage),
         (0xB6, 4, &AdressingMode::ZeroPageY),
@@ -778,7 +778,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xBE, 4, &AdressingMode::AbsoluteY)
     ),
 
-    instr!("LDY", instructions::ldy,
+    instr!("LDY", instruction_impls::ldy,
         (0xA0, 2, &AdressingMode::Immediate),
         (0xA4, 3, &AdressingMode::ZeroPage),
         (0xB4, 4, &AdressingMode::ZeroPageX),
@@ -786,7 +786,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xBC, 4, &AdressingMode::AbsoluteX)
     ),
 
-    instr!("STA", instructions::sta,
+    instr!("STA", instruction_impls::sta,
         (0x85, 3, &AdressingMode::ZeroPage),
         (0x95, 4, &AdressingMode::ZeroPageX),
         (0x8D, 4, &AdressingMode::Absolute),
@@ -796,13 +796,13 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x91, 6, &AdressingMode::IndirectY)
     ),
 
-    instr!("STX", instructions::stx,
+    instr!("STX", instruction_impls::stx,
         (0x86, 3, &AdressingMode::ZeroPage),
         (0x96, 4, &AdressingMode::ZeroPageY),
         (0x8E, 4, &AdressingMode::Absolute)
     ),
 
-    instr!("STY", instructions::sty,
+    instr!("STY", instruction_impls::sty,
         (0x84, 3, &AdressingMode::ZeroPage),
         (0x94, 4, &AdressingMode::ZeroPageX),
         (0x8C, 4, &AdressingMode::Absolute)
@@ -810,7 +810,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
 
     // Unofficial opcodes
 
-    instr!("LAX", instructions::lax,
+    instr!("LAX", instruction_impls::lax,
         (0xA7, 3, &AdressingMode::ZeroPage),
         (0xB7, 4, &AdressingMode::ZeroPageY),
         (0xAF, 4, &AdressingMode::Absolute),
@@ -819,14 +819,14 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xB3, 5, &AdressingMode::IndirectY)
     ),
 
-    instr!("SAX", instructions::sax,
+    instr!("SAX", instruction_impls::sax,
         (0x87, 3, &AdressingMode::ZeroPage),
         (0x97, 4, &AdressingMode::ZeroPageY),
         (0x8F, 4, &AdressingMode::Absolute),
         (0x83, 6, &AdressingMode::IndirectX)
     ),
 
-    instr!("DCP", instructions::dcp,
+    instr!("DCP", instruction_impls::dcp,
         (0xC7, 5, &AdressingMode::ZeroPage),
         (0xD7, 6, &AdressingMode::ZeroPageX),
         (0xCF, 6, &AdressingMode::Absolute),
@@ -836,7 +836,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xD3, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("ISC", instructions::isc,
+    instr!("ISC", instruction_impls::isc,
         (0xE7, 5, &AdressingMode::ZeroPage),
         (0xF7, 6, &AdressingMode::ZeroPageX),
         (0xEF, 6, &AdressingMode::Absolute),
@@ -846,7 +846,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xF3, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("SLO", instructions::slo,
+    instr!("SLO", instruction_impls::slo,
         (0x07, 5, &AdressingMode::ZeroPage),
         (0x17, 6, &AdressingMode::ZeroPageX),
         (0x0F, 6, &AdressingMode::Absolute),
@@ -856,7 +856,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x13, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("RLA", instructions::rla,
+    instr!("RLA", instruction_impls::rla,
         (0x27, 5, &AdressingMode::ZeroPage),
         (0x37, 6, &AdressingMode::ZeroPageX),
         (0x2F, 6, &AdressingMode::Absolute),
@@ -866,7 +866,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x33, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("SRE", instructions::sre,
+    instr!("SRE", instruction_impls::sre,
         (0x47, 5, &AdressingMode::ZeroPage),
         (0x57, 6, &AdressingMode::ZeroPageX),
         (0x4F, 6, &AdressingMode::Absolute),
@@ -876,7 +876,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x53, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("RRA", instructions::rra,
+    instr!("RRA", instruction_impls::rra,
         (0x67, 5, &AdressingMode::ZeroPage),
         (0x77, 6, &AdressingMode::ZeroPageX),
         (0x6F, 6, &AdressingMode::Absolute),
@@ -886,7 +886,7 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0x73, 8, &AdressingMode::IndirectY)
     ),
 
-    instr!("ALR", instructions::alr,
+    instr!("ALR", instruction_impls::alr,
         (0x4B, 2, &AdressingMode::Immediate)
     )
 ];

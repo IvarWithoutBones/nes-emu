@@ -132,13 +132,12 @@ impl Cpu {
         }
 
         let opcode = self.read_byte(self.program_counter);
-        let (instr, mode, cycles) = Instruction::decode(&opcode).expect(
-            format!(
+        let (instr, mode, cycles) = Instruction::decode(&opcode).unwrap_or_else(|| {
+            panic!(
                 "invalid opcode ${:02X} at PC ${:04X}",
                 opcode, self.program_counter
             )
-            .as_str(),
-        );
+        });
 
         let state = CpuState {
             instruction: instr.format(self, mode),
@@ -260,28 +259,24 @@ mod test {
     use super::*;
 
     fn run_cpu(cpu: &mut Cpu) {
-        loop {
-            if let Some(state) = cpu.step() {
-                // Unfortunately tracing doesn't seem to want to cooperate with tests.
-                // It'll print the logs even for passing tests, which clutters the output.
-                println!("{}  {}", cpu, state.instruction);
-            } else {
-                break;
-            }
+        while let Some(state) = cpu.step() {
+            // Unfortunately tracing doesn't seem to want to cooperate with tests.
+            // It'll print the logs even for passing tests, which clutters the output.
+            println!("{}  {}", cpu, state.instruction);
         }
     }
 
     #[test]
     fn test_nth_bit() {
         let value = 0b1010_1010;
-        assert_eq!(Cpu::nth_bit(value, 0), false);
-        assert_eq!(Cpu::nth_bit(value, 1), true);
-        assert_eq!(Cpu::nth_bit(value, 2), false);
-        assert_eq!(Cpu::nth_bit(value, 3), true);
-        assert_eq!(Cpu::nth_bit(value, 4), false);
-        assert_eq!(Cpu::nth_bit(value, 5), true);
-        assert_eq!(Cpu::nth_bit(value, 6), false);
-        assert_eq!(Cpu::nth_bit(value, 7), true);
+        assert!(!Cpu::nth_bit(value, 0));
+        assert!(Cpu::nth_bit(value, 1));
+        assert!(!Cpu::nth_bit(value, 2));
+        assert!(Cpu::nth_bit(value, 3));
+        assert!(!Cpu::nth_bit(value, 4));
+        assert!(Cpu::nth_bit(value, 5));
+        assert!(!Cpu::nth_bit(value, 6));
+        assert!(Cpu::nth_bit(value, 7));
     }
 
     macro_rules! test_cpu {

@@ -145,16 +145,16 @@ impl Ppu {
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             let result = self.character_rom[addr as usize];
             tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
-            return self.update_data_buffer(result);
+            self.update_data_buffer(result)
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
             let result = self.vram[self.mirror_nametable(addr) as usize];
             tracing::debug!("nametable read at ${:04X}: ${:02X}", addr, result);
-            return self.update_data_buffer(result);
+            self.update_data_buffer(result)
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             // TODO: This should set the data buffer to the nametable "below" the pattern table
             let result = self.palette_table[self.mirror_palette_table(addr)];
             tracing::debug!("palette RAM read at ${:04X}: ${:02X}", addr, result);
-            return result;
+            result
         } else {
             tracing::error!("invalid data read at ${:04X}", addr);
             panic!()

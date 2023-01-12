@@ -16,7 +16,7 @@ pub use step_state::StepState;
 pub struct CpuDebugger {
     span: tracing::Span,
     cpu_state_receiver: Receiver<Box<CpuState>>,
-    cpu_states: Vec<Box<CpuState>>,
+    cpu_states: Vec<CpuState>,
     selected_cpu_state_index: Option<usize>,
 
     step_sender: Sender<StepState>,
@@ -92,7 +92,7 @@ impl CpuDebugger {
         }
     }
 
-    fn selected_or_last_cpu_state(&self) -> Option<&Box<CpuState>> {
+    fn selected_or_last_cpu_state(&self) -> Option<&CpuState> {
         let selected_index = if self.selected_cpu_state_index.is_some() {
             self.selected_cpu_state_index.unwrap()
         } else {
@@ -104,7 +104,7 @@ impl CpuDebugger {
     pub fn update_buffer(&mut self) {
         // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {
-            self.cpu_states.push(state);
+            self.cpu_states.push(*state);
             // Trim the cache if it gets too big, so we don't run out of memory.
             if self.cpu_states.len() > (Self::MAX_CPU_STATES + Self::CPU_STATES_BUFFER) {
                 self.cpu_states.drain(0..Self::CPU_STATES_BUFFER);
@@ -167,7 +167,7 @@ impl CpuDebugger {
                     egui::Grid::new(index).show(ui, |ui| {
                         // Highlight the selected instruction
                         let pc_text = if self.selected_cpu_state_index == Some(index)
-                            || (self.selected_cpu_state_index == None
+                            || (self.selected_cpu_state_index.is_none()
                                 && index == self.cpu_states.len() - 1)
                         {
                             egui::RichText::new(format!("{:04X}", state.program_counter))
@@ -271,7 +271,7 @@ impl CpuDebugger {
         viewer: &mut egui_memory_editor::MemoryEditor,
     ) {
         header_label(ui, "Memory Viewer");
-        let mut mem = state.memory.clone();
+        let mut mem = state.memory;
         viewer.draw_editor_contents_read_only(ui, &mut mem, |mem, addr| {
             if addr >= mem.len() {
                 tracing::warn!("memory viewer address out of bounds: {}", addr);

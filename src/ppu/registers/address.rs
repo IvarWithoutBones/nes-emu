@@ -40,7 +40,7 @@ impl Address {
     fn mirror(&mut self) {
         const HIGHEST_VALID_ADDR: u16 = 0x4000;
         if self.value >= HIGHEST_VALID_ADDR {
-            self.value = self.value % HIGHEST_VALID_ADDR;
+            self.value %= HIGHEST_VALID_ADDR;
         }
     }
 }
