@@ -1,4 +1,6 @@
-use std::ops::Range;
+use crate::util;
+use bitflags::bitflags;
+use std::ops::{Index, Range};
 
 /// https://www.nesdev.org/wiki/PPU_OAM
 pub struct ObjectAttributeMemory {
@@ -7,18 +9,8 @@ pub struct ObjectAttributeMemory {
     address: u8,
 }
 
-impl Default for ObjectAttributeMemory {
-    fn default() -> Self {
-        Self {
-            span: tracing::span!(tracing::Level::INFO, "ppu:oam"),
-            memory: [0; Self::MEMORY_SIZE],
-            address: 0,
-        }
-    }
-}
-
 impl ObjectAttributeMemory {
-    const MEMORY_SIZE: usize = 0x100;
+    pub const MEMORY_SIZE: usize = 0x100;
 
     #[tracing::instrument(skip(self, data), parent = &self.span)]
     pub fn write_address(&mut self, data: u8) {
@@ -57,6 +49,100 @@ impl ObjectAttributeMemory {
 
         for byte in fetch_buf(begin..end) {
             self.write_data(byte);
+        }
+    }
+
+    pub fn iter(&self) -> OamIterator<'_> {
+        OamIterator {
+            index: 0,
+            oam: self,
+        }
+    }
+}
+
+bitflags! {
+    /*
+        https://www.nesdev.org/wiki/PPU_OAM#Byte_2
+
+        76543210
+        ||||||||
+        ||||||++- Palette (4 to 7) of sprite
+        |||+++--- Unimplemented (read 0)
+        ||+------ Priority (0: in front of background; 1: behind background)
+        |+------- Flip sprite horizontally
+        +-------- Flip sprite vertically
+    */
+    struct ObjectAttrs: u8 {
+        const Palette2       = 0b0000_0001;
+        const Palette1       = 0b0000_0010;
+        const Priority       = 0b0010_0000;
+        const FlipHorizontal = 0b0100_0000;
+        const FlipVertical   = 0b1000_0000;
+    }
+}
+
+pub struct Object {
+    pub x: usize,
+    pub y: usize,
+    pub flip_horizontal: bool,
+    pub flip_vertical: bool,
+    pub palette_index: usize,
+    pub tile_index: usize,
+}
+
+pub struct OamIterator<'a> {
+    oam: &'a ObjectAttributeMemory,
+    index: usize,
+}
+
+impl<'a> Iterator for OamIterator<'a> {
+    type Item = Object;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= ObjectAttributeMemory::MEMORY_SIZE {
+            return None;
+        }
+
+        let attrs = ObjectAttrs::from_bits_truncate(self.oam[self.index + 2]);
+        let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
+        let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
+
+        // TODO: Ignoring 8x16 sprites for now
+        let tile_index = self.oam[self.index + 1] as usize;
+        let palette_index = util::combine_bools(
+            attrs.contains(ObjectAttrs::Palette1),
+            attrs.contains(ObjectAttrs::Palette2),
+        ) as usize;
+
+        let x = self.oam[self.index + 3] as usize;
+        let y = self.oam[self.index] as usize;
+
+        self.index += 4;
+        Some(Object {
+            x,
+            y,
+            tile_index,
+            palette_index,
+            flip_horizontal,
+            flip_vertical,
+        })
+    }
+}
+
+impl Index<usize> for ObjectAttributeMemory {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.memory[index]
+    }
+}
+
+impl Default for ObjectAttributeMemory {
+    fn default() -> Self {
+        Self {
+            span: tracing::span!(tracing::Level::INFO, "ppu:oam"),
+            memory: [0; Self::MEMORY_SIZE],
+            address: 0,
         }
     }
 }

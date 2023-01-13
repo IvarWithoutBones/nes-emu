@@ -1,3 +1,4 @@
+use crate::util::FormatBitFlags;
 use bitflags::bitflags;
 
 bitflags! {
@@ -44,14 +45,6 @@ impl std::fmt::Display for Status {
 }
 
 impl Status {
-    fn format(&self, flag: Self, display: char) -> char {
-        if self.contains(flag) {
-            display
-        } else {
-            '-'
-        }
-    }
-
     pub fn read(&mut self) -> u8 {
         self.bits()
     }

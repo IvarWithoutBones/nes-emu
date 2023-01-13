@@ -1,7 +1,6 @@
+use crate::util;
 use bitflags::bitflags;
 use std::sync::mpsc::Receiver;
-
-pub const CONTROLLER_ONE: u16 = 0x4016;
 
 bitflags! {
     #[derive(Default, Clone)]
@@ -39,7 +38,7 @@ impl Controller {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn write(&mut self, data: u8) {
-        self.strobe = nth_bit(data, 0);
+        self.strobe = util::nth_bit(data, 0);
         tracing::debug!("strobe: {}", self.strobe);
         if self.strobe {
             self.index = 0;
@@ -53,7 +52,7 @@ impl Controller {
             Buttons::format_index(self.index)
         );
 
-        let result = nth_bit(self.buttons.bits(), self.index) as u8;
+        let result = util::nth_bit(self.buttons.bits(), self.index) as u8;
         if !self.strobe {
             self.index = self.index.wrapping_add(1);
         }
@@ -65,11 +64,6 @@ impl Controller {
             self.buttons = buttons;
         }
     }
-}
-
-// TODO: move to lib.rs or something, this is duplicated from Cpu
-pub const fn nth_bit(value: u8, n: u8) -> bool {
-    value & (1 << n) != 0
 }
 
 impl Buttons {

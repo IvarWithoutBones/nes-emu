@@ -5,6 +5,7 @@ mod instructions;
 
 use crate::bus::{Bus, Clock, CycleCount, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
 use crate::gui::cpu_debugger::StepState;
+use crate::util;
 use flags::CpuFlags;
 use instructions::Instruction;
 use std::fmt;
@@ -71,11 +72,6 @@ impl Cpu {
         tracing::info!("resetting. PC={:04X}", self.program_counter);
     }
 
-    /// Get the status of bit N
-    pub const fn nth_bit(value: u8, n: u8) -> bool {
-        value & (1 << n) != 0
-    }
-
     /// Check if two values are contained on a different page in memory
     pub const fn is_on_different_page(a: u16, b: u16) -> bool {
         (a & 0xFF00) != (b & 0xFF00)
@@ -106,7 +102,7 @@ impl Cpu {
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
-        self.flags.set(CpuFlags::Negative, Self::nth_bit(value, 7));
+        self.flags.set(CpuFlags::Negative, util::nth_bit(value, 7));
         self.flags.set(CpuFlags::Zero, value == 0);
     }
 
@@ -269,14 +265,14 @@ mod test {
     #[test]
     fn test_nth_bit() {
         let value = 0b1010_1010;
-        assert!(!Cpu::nth_bit(value, 0));
-        assert!(Cpu::nth_bit(value, 1));
-        assert!(!Cpu::nth_bit(value, 2));
-        assert!(Cpu::nth_bit(value, 3));
-        assert!(!Cpu::nth_bit(value, 4));
-        assert!(Cpu::nth_bit(value, 5));
-        assert!(!Cpu::nth_bit(value, 6));
-        assert!(Cpu::nth_bit(value, 7));
+        assert!(!util::nth_bit(value, 0));
+        assert!(util::nth_bit(value, 1));
+        assert!(!util::nth_bit(value, 2));
+        assert!(util::nth_bit(value, 3));
+        assert!(!util::nth_bit(value, 4));
+        assert!(util::nth_bit(value, 5));
+        assert!(!util::nth_bit(value, 6));
+        assert!(util::nth_bit(value, 7));
     }
 
     macro_rules! test_cpu {

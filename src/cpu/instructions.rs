@@ -99,6 +99,8 @@ fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
 
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
 mod instruction_impls {
+    use crate::util;
+
     use super::*;
 
     pub fn nop(cpu: &mut Cpu, mode: &AdressingMode) {
@@ -334,14 +336,14 @@ mod instruction_impls {
     pub fn lsr(cpu: &mut Cpu, mode: &AdressingMode) {
         let result = if mode == &AdressingMode::Accumulator {
             cpu.flags
-                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 0));
+                .set(CpuFlags::Carry, util::nth_bit(cpu.accumulator, 0));
             cpu.accumulator >>= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
+            cpu.flags.set(CpuFlags::Carry, util::nth_bit(value, 0));
             value >>= 1;
             cpu.write_byte(addr, value);
             value
@@ -353,14 +355,14 @@ mod instruction_impls {
     pub fn asl(cpu: &mut Cpu, mode: &AdressingMode) {
         let result = if mode == &AdressingMode::Accumulator {
             cpu.flags
-                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 7));
+                .set(CpuFlags::Carry, util::nth_bit(cpu.accumulator, 7));
             cpu.accumulator <<= 1;
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
+            cpu.flags.set(CpuFlags::Carry, util::nth_bit(value, 7));
             value <<= 1;
             cpu.write_byte(addr, value);
             value
@@ -375,14 +377,14 @@ mod instruction_impls {
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.flags
-                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 0));
+                .set(CpuFlags::Carry, util::nth_bit(cpu.accumulator, 0));
             cpu.accumulator = rotate_right(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 0));
+            cpu.flags.set(CpuFlags::Carry, util::nth_bit(value, 0));
             value = rotate_right(value);
             cpu.write_byte(addr, value);
             value
@@ -397,14 +399,14 @@ mod instruction_impls {
 
         let result = if mode == &AdressingMode::Accumulator {
             cpu.flags
-                .set(CpuFlags::Carry, Cpu::nth_bit(cpu.accumulator, 7));
+                .set(CpuFlags::Carry, util::nth_bit(cpu.accumulator, 7));
             cpu.accumulator = rotate_left(cpu.accumulator);
             cpu.accumulator
         } else {
             let addr = mode.fetch_param_address(cpu).0;
             let mut value = cpu.read_byte(addr);
 
-            cpu.flags.set(CpuFlags::Carry, Cpu::nth_bit(value, 7));
+            cpu.flags.set(CpuFlags::Carry, util::nth_bit(value, 7));
             value = rotate_left(value);
             cpu.write_byte(addr, value);
             value
@@ -474,8 +476,8 @@ mod instruction_impls {
         let value = mode.fetch_param(cpu).0;
         cpu.flags
             .set(CpuFlags::Zero, (cpu.accumulator & value) == 0);
-        cpu.flags.set(CpuFlags::Negative, Cpu::nth_bit(value, 7));
-        cpu.flags.set(CpuFlags::Overflow, Cpu::nth_bit(value, 6));
+        cpu.flags.set(CpuFlags::Negative, util::nth_bit(value, 7));
+        cpu.flags.set(CpuFlags::Overflow, util::nth_bit(value, 6));
     }
 
     pub fn tsx(cpu: &mut Cpu, _mode: &AdressingMode) {

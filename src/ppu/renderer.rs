@@ -1,3 +1,6 @@
+use crate::util;
+
+use super::object_attribute::ObjectAttributeMemory;
 use super::Ppu;
 use std::ops::Range;
 use std::sync::mpsc::Sender;
@@ -42,23 +45,25 @@ impl Renderer {
         self.pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
-    fn draw_tile(&mut self, tile: &[u8], palette: [u8; 4], x: usize, y: usize) {
+    fn for_pixel_in_tile<T>(&mut self, tile: &[u8], palette: [u8; 4], draw_fn: T)
+    where
+        T: Fn(&mut Self, usize, usize, (u8, u8, u8)),
+    {
         const BETWEEN_PLANES: usize = 8;
         const PIXELS_PER_ROW: usize = 8;
 
-        for y_offset in 0..PIXELS_PER_ROW {
-            let mut lower_plane = tile[y_offset];
-            let mut upper_plane = tile[y_offset + BETWEEN_PLANES];
+        for y in 0..PIXELS_PER_ROW {
+            let mut lower_plane = tile[y];
+            let mut upper_plane = tile[y + BETWEEN_PLANES];
 
-            for x_offset in (0..PIXELS_PER_ROW).rev() {
-                let rgb = SYSTEM_PALLETE
-                    [palette[Self::to_color_index(upper_plane, lower_plane) as usize] as usize];
+            for x in (0..PIXELS_PER_ROW).rev() {
+                let palette_index = util::combine_bools(
+                    util::nth_bit(upper_plane, 0),
+                    util::nth_bit(lower_plane, 0),
+                ) as usize;
 
-                self.set_pixel(
-                    (x * PIXELS_PER_ROW) + x_offset,
-                    (y * PIXELS_PER_ROW) + y_offset,
-                    rgb,
-                );
+                let rgb = SYSTEM_PALLETE[palette[palette_index] as usize];
+                draw_fn(self, x, y, rgb);
 
                 // Loop over the color indices for each pixel
                 upper_plane >>= 1;
@@ -67,7 +72,19 @@ impl Renderer {
         }
     }
 
-    fn fetch_bg_palette(
+    const fn to_tile_range(bank: usize, tile_index: usize) -> Range<usize> {
+        const TILE_LEN: usize = 16;
+        let start = bank + (tile_index * TILE_LEN);
+        let end = start + TILE_LEN;
+        start..end
+    }
+
+    const fn to_palette_start(quad: Quadrant, attr: u8) -> usize {
+        let palette_index = (attr >> quad as u8) & 0b11;
+        ((palette_index as usize) * 4) + 1
+    }
+
+    fn background_palette(
         vram: &[u8; Ppu::VRAM_SIZE],
         palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE],
         nametable_offset: usize,
@@ -101,56 +118,59 @@ impl Renderer {
         let nametable_offset = ROWS_PER_NAMETABLE * TILES_PER_ROW;
 
         for i in 0..nametable_offset {
-            let y = i / TILES_PER_ROW;
-            let x = i % TILES_PER_ROW;
+            let tile_x = i % TILES_PER_ROW;
+            let tile_y = i / TILES_PER_ROW;
 
             let tile_index = vram[i] as usize;
             let tile = &chr_rom[Self::to_tile_range(bank, tile_index)];
-            let palette = Self::fetch_bg_palette(vram, palette_table, nametable_offset, x, y);
+            let palette =
+                Self::background_palette(vram, palette_table, nametable_offset, tile_x, tile_y);
 
-            self.draw_tile(tile, palette, x, y);
-            tracing::trace!("drawing tile {} at {},{} ({})", tile_index, x, y, i);
+            self.for_pixel_in_tile(tile, palette, |this, x, y, color| {
+                this.set_pixel((tile_x * 8) + x, (tile_y * 8) + y, color);
+            });
+
+            tracing::trace!("drawing tile {} at {},{}", tile_index, tile_x, tile_y,);
         }
     }
 
-    const fn to_tile_range(bank: usize, tile_index: usize) -> Range<usize> {
-        const TILE_LEN: usize = 16;
-        let start = bank + (tile_index * TILE_LEN);
-        let end = start + TILE_LEN;
-        start..end
+    fn sprite_palette(palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE], index: usize) -> [u8; 4] {
+        // The palette table starts at 0x3F00 but the sprite entries do at 0x3F11
+        let start = 0x11 + (index * 4) as usize;
+        [
+            0,
+            palette_table[start],
+            palette_table[start + 1],
+            palette_table[start + 2],
+        ]
     }
 
-    const fn to_color_index(upper_plane: u8, lower_plane: u8) -> u8 {
-        // Combine the two to get a 2-bit color index (0-3)
-        ((1 & upper_plane) << 1) | (1 & lower_plane)
-    }
+    pub fn draw_sprites(
+        &mut self,
+        bank: usize,
+        chr_rom: &[u8],
+        palette_table: &[u8; Ppu::PALETTE_TABLE_SIZE],
+        oam: &ObjectAttributeMemory,
+    ) {
+        for object in oam.iter() {
+            let tile = &chr_rom[Self::to_tile_range(bank, object.tile_index)];
+            let palette = Self::sprite_palette(palette_table, object.palette_index);
 
-    const fn to_palette_start(quad: Quadrant, attr: u8) -> usize {
-        let palette_index = (attr >> quad as u8) & 0b11;
-        ((palette_index as usize) * 4) + 1
-    }
+            self.for_pixel_in_tile(tile, palette, |this, x, y, color| {
+                if color == SYSTEM_PALLETE[0] {
+                    // Transparant
+                    return;
+                }
 
-    // For the debugger in the future
-    // #[allow(dead_code)]
-    // pub fn show_tiles_in_bank(&mut self, character_rom: &Vec<u8>, bank: usize) {
-    //     assert!(bank <= 1);
-    //     const TILES_PER_BANK: usize = 256;
-    //     const TILES_PER_ROW: usize = 20;
-    //
-    //     let mut y_offset = 0;
-    //     let mut x_offset = 0;
-    //     for tile_index in 0..TILES_PER_BANK {
-    //         // Scroll to the next row if needed
-    //         if tile_index != 0 && tile_index % TILES_PER_ROW == 0 {
-    //             y_offset += 10;
-    //             x_offset = 0;
-    //         }
-    //
-    //         let tile = &character_rom[Self::to_tile_range(bank, tile_index)];
-    //         self.draw_tile(tile, x_offset, y_offset);
-    //         x_offset += 10;
-    //     }
-    // }
+                match (object.flip_horizontal, object.flip_vertical) {
+                    (false, false) => this.set_pixel(object.x + x, object.y + y, color),
+                    (true, false) => this.set_pixel((object.x + 7) - x, object.y + y, color),
+                    (false, true) => this.set_pixel(object.x + x, (object.y + 7) - y, color),
+                    (true, true) => this.set_pixel((object.x + 7) - x, (object.y + 7) - y, color),
+                }
+            });
+        }
+    }
 }
 
 /// https://www.nesdev.org/wiki/PPU_attribute_tables

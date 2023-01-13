@@ -4,6 +4,7 @@ mod controller;
 mod cpu;
 mod gui;
 mod ppu;
+mod util;
 
 use bus::Bus;
 use clap::Parser;

@@ -1,6 +1,5 @@
 use crate::cartridge::Cartridge;
 use crate::controller;
-use crate::controller::CONTROLLER_ONE;
 use crate::ppu::renderer::PixelBuffer;
 use crate::ppu::{self, *};
 use std::ops::RangeInclusive;
@@ -9,6 +8,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 pub const CPU_RAM_SIZE: usize = 2048;
 const CPU_RAM_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
 pub const PROGRAM_ROM_RANGE: RangeInclusive<u16> = 0x8000..=0xFFFF;
+// TODO: Second controller
+const CONTROLLER_RANGE: RangeInclusive<u16> = 0x4016..=0x4016;
 
 pub type CycleCount = usize;
 
@@ -106,7 +107,7 @@ impl Bus {
 impl Memory for Bus {
     #[tracing::instrument(skip(self, address), parent = &self.span)]
     fn read_byte(&mut self, address: u16) -> u8 {
-        if address == CONTROLLER_ONE {
+        if CONTROLLER_RANGE.contains(&address) {
             self.controller.read()
         } else if PROGRAM_ROM_RANGE.contains(&address) {
             let addr = (address - PROGRAM_ROM_RANGE.start()) % 0x4000;
@@ -139,7 +140,7 @@ impl Memory for Bus {
 
     #[tracing::instrument(skip(self, address, data), parent = &self.span)]
     fn write_byte(&mut self, address: u16, data: u8) {
-        if address == CONTROLLER_ONE {
+        if CONTROLLER_RANGE.contains(&address) {
             self.controller.write(data);
         } else if CPU_RAM_RANGE.contains(&address) {
             let addr = Self::to_cpu_ram_address(address);

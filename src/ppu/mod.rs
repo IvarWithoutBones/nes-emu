@@ -97,9 +97,20 @@ impl Ppu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
-        let bank = self.control.bg_pattern_bank_addr();
-        self.renderer
-            .draw_background(bank, &self.character_rom, &self.palette_table, &self.vram);
+        self.renderer.draw_background(
+            self.control.background_bank(),
+            &self.character_rom,
+            &self.palette_table,
+            &self.vram,
+        );
+
+        self.renderer.draw_sprites(
+            self.control.sprite_bank(),
+            &self.character_rom,
+            &self.palette_table,
+            &self.oam,
+        );
+
         self.renderer.update();
         tracing::info!("rendering frame");
     }

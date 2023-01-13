@@ -23,7 +23,7 @@ bitflags! {
     pub struct Control: u8 {
         const NametableAddress             = 0b0000_0011;
         const VramAdressIncrement          = 0b0000_0100;
-        const SpritePatternTableAddress    = 0b0000_1000;
+        const SpritePatternTableBank       = 0b0000_1000;
         const BackgroundPatternBank        = 0b0001_0000;
         const SpriteSize                   = 0b0010_0000;
         const ParentChildSelect            = 0b0100_0000;
@@ -56,8 +56,16 @@ impl Control {
         self.contains(Self::NonMaskableInterruptAtVBlank)
     }
 
-    pub fn bg_pattern_bank_addr(&self) -> usize {
+    pub fn background_bank(&self) -> usize {
         if self.contains(Self::BackgroundPatternBank) {
+            0x1000
+        } else {
+            0
+        }
+    }
+
+    pub fn sprite_bank(&self) -> usize {
+        if self.contains(Self::SpritePatternTableBank) {
             0x1000
         } else {
             0

@@ -1,3 +1,4 @@
+use crate::util::FormatBitFlags;
 use bitflags::bitflags;
 
 bitflags! {
@@ -32,31 +33,20 @@ bitflags! {
 impl Default for CpuFlags {
     fn default() -> CpuFlags {
         Self::InterruptsDisabled | Self::Break | Self::Break2
-        // Self::IRQ | Self::BREAK2 // Hack to diff against nestest log, above is correct
-    }
-}
-
-impl CpuFlags {
-    const fn format(&self, flag: CpuFlags, display: char) -> char {
-        if self.contains(flag) {
-            display
-        } else {
-            '-'
-        }
     }
 }
 
 impl std::fmt::Display for CpuFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut string = String::with_capacity(8);
-        string.push(self.format(CpuFlags::Negative, 'N'));
-        string.push(self.format(CpuFlags::Overflow, 'O'));
-        string.push(self.format(CpuFlags::Break2, 'B'));
-        string.push(self.format(CpuFlags::Break, 'B'));
-        string.push(self.format(CpuFlags::Decimal, 'D'));
-        string.push(self.format(CpuFlags::InterruptsDisabled, 'I'));
-        string.push(self.format(CpuFlags::Zero, 'Z'));
-        string.push(self.format(CpuFlags::Carry, 'C'));
+        string.push(self.format(Self::Negative, 'N'));
+        string.push(self.format(Self::Overflow, 'O'));
+        string.push(self.format(Self::Break2, 'B'));
+        string.push(self.format(Self::Break, 'B'));
+        string.push(self.format(Self::Decimal, 'D'));
+        string.push(self.format(Self::InterruptsDisabled, 'I'));
+        string.push(self.format(Self::Zero, 'Z'));
+        string.push(self.format(Self::Carry, 'C'));
         write!(f, "{}", string)
     }
 }
