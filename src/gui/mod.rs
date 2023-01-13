@@ -1,11 +1,13 @@
 pub mod cpu_debugger;
+mod input;
 mod screen;
 
-use crate::{cpu::CpuState, ppu::renderer::PixelBuffer};
+use crate::{controller, cpu::CpuState, ppu::renderer::PixelBuffer};
 use cpu_debugger::{step_state::StepState, CpuDebugger};
 use eframe::egui;
 use screen::Screen;
 use std::sync::mpsc::{Receiver, Sender};
+use self::input::Input;
 
 #[derive(PartialEq)]
 enum View {
@@ -18,6 +20,7 @@ pub struct Gui {
     screen: Screen,
     cpu_debugger: CpuDebugger,
     current_view: View,
+    input: Input,
 }
 
 impl Gui {
@@ -25,6 +28,7 @@ impl Gui {
         span: tracing::Span,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
+        button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) -> Self {
         Self {
@@ -32,6 +36,7 @@ impl Gui {
             screen: Screen::new(pixel_receiver),
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
+            input: Input::new(button_sender),
         }
     }
 
@@ -39,6 +44,7 @@ impl Gui {
         window_title: &str,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
+        button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
@@ -51,6 +57,7 @@ impl Gui {
                     span,
                     cpu_state_receiver,
                     step_sender,
+                    button_sender,
                     pixel_receiver,
                 ))
             }),
@@ -93,6 +100,7 @@ impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Not updating the buffers will cause a memory leak because the MPSC channels wont be emptied.
         // TODO: Switch to a bounded crossbeam channel to avoid this.
+        self.input.update(ctx);
         self.screen.update_buffer(ctx);
         self.cpu_debugger.update_buffer();
 

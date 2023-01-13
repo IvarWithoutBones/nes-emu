@@ -169,11 +169,11 @@ impl Ppu {
         if Self::NAMETABLE_RANGE.contains(&addr) {
             let vram_index = self.mirror_nametable(addr) as usize;
             self.vram[vram_index] = data;
-            tracing::info!("nametable write at ${:04X}: ${:02X}", vram_index, data);
+            tracing::debug!("nametable write at ${:04X}: ${:02X}", vram_index, data);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             let palette_index = self.mirror_palette_table(addr);
             self.palette_table[palette_index] = data;
-            tracing::info!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
+            tracing::debug!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
         } else if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             tracing::error!(
                 "attempting to write to read-only character ROM at ${:04X}: ${:02X}",

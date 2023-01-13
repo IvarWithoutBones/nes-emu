@@ -1,5 +1,6 @@
 mod bus;
 mod cartridge;
+mod controller;
 mod cpu;
 mod gui;
 mod ppu;
@@ -42,28 +43,39 @@ fn main() {
         std::process::exit(1);
     });
 
-    let (pixel_sender, pixel_receiver) = channel();
-    let bus: Bus = Bus::new(pixel_sender, &rom_data);
-
     // CPU state communication if the GUI is enabled
+    let mut step_sender = None;
     let mut step_receiver = None;
+
     let mut state_sender = None;
-    let (state_receiver, step_sender) = if !args.without_gui {
+    let mut state_receiver = None;
+
+    if !args.without_gui {
         let (state_sender_c, state_receiver_c) = channel();
-        let (step_sender_c, step_receiver_c) = channel();
         state_sender = Some(state_sender_c);
+        state_receiver = Some(state_receiver_c);
+
+        let (step_sender_c, step_receiver_c) = channel();
+        step_sender = Some(step_sender_c);
         step_receiver = Some(step_receiver_c);
-        (Some(state_receiver_c), Some(step_sender_c))
-    } else {
-        (None, None)
-    };
+    }
+
+    let (pixel_sender, pixel_receiver) = channel();
+    let (button_sender, button_receiver) = channel();
+    let bus: Bus = Bus::new(button_receiver, pixel_sender, &rom_data);
 
     // Boot up the CPU
     let cpu_handle = cpu::spawn_thread(bus, state_sender, step_receiver);
 
     // Start the GUI, if enabled
     if !args.without_gui {
-        Gui::run("NES emu", state_receiver.unwrap(), step_sender.unwrap(), pixel_receiver);
+        Gui::run(
+            "NES emu",
+            state_receiver.unwrap(),
+            step_sender.unwrap(),
+            button_sender,
+            pixel_receiver,
+        );
     }
 
     if cpu_handle.join().is_err() {

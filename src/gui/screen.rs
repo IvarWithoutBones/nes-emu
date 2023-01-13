@@ -33,7 +33,7 @@ impl Screen {
 
     /// Update the internal texture with a pixel buffer, if the PPU has generated one.
     pub fn update_buffer(&mut self, ctx: &egui::Context) {
-        if let Some(buf) = self.receiver.try_iter().last() {
+        while let Some(buf) = self.receiver.try_iter().last() {
             self.texture = Some(ctx.load_texture(
                 "screen-with-pixels",
                 egui::ColorImage::from_rgb([WIDTH, HEIGHT], &*buf),
