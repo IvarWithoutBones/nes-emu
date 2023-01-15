@@ -1,13 +1,17 @@
 mod object_attribute;
-pub(crate) mod registers;
+mod palette;
+pub mod registers;
 pub mod renderer;
 
-use self::renderer::{PixelBuffer, Renderer};
 use super::bus::{Clock, CycleCount};
 use crate::cartridge::Mirroring;
 use object_attribute::ObjectAttributeMemory;
 use registers::Register;
+use renderer::{PixelBuffer, Renderer};
 use std::{ops::RangeInclusive, sync::mpsc::Sender};
+
+const VIDEO_RAM_SIZE: usize = 0x800;
+pub type VideoRam = [u8; VIDEO_RAM_SIZE];
 
 type ScanlineCount = u16;
 
@@ -15,12 +19,10 @@ type ScanlineCount = u16;
 pub struct Ppu {
     span: tracing::Span,
     mirroring: Mirroring,
-    character_rom: Vec<u8>,
     pub renderer: Renderer,
 
     data_buffer: u8,
-    palette_table: [u8; Self::PALETTE_TABLE_SIZE],
-    vram: [u8; Self::VRAM_SIZE],
+    vram: VideoRam,
     pub oam: ObjectAttributeMemory,
 
     control: registers::Control,
@@ -39,9 +41,6 @@ impl Ppu {
     const NAMETABLE_RANGE: RangeInclusive<u16> = 0x2000..=0x3EFF;
     const PALETTE_RAM_RANGE: RangeInclusive<u16> = 0x3F00..=0x3FFF;
 
-    const PALETTE_TABLE_SIZE: usize = 32;
-    const VRAM_SIZE: usize = 0x800;
-
     pub fn new(
         pixel_sender: Sender<Box<PixelBuffer>>,
         character_rom: Vec<u8>,
@@ -49,13 +48,11 @@ impl Ppu {
     ) -> Self {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
+            renderer: Renderer::new(character_rom, pixel_sender),
             mirroring,
-            character_rom,
-            renderer: Renderer::new(pixel_sender),
 
             data_buffer: 0,
-            palette_table: [0; Self::PALETTE_TABLE_SIZE],
-            vram: [0; Self::VRAM_SIZE],
+            vram: [0; VIDEO_RAM_SIZE],
             oam: ObjectAttributeMemory::default(),
 
             control: registers::Control::default(),
@@ -85,10 +82,6 @@ impl Ppu {
         }
     }
 
-    const fn mirror_palette_table(&self, addr: u16) -> usize {
-        (addr % Self::PALETTE_TABLE_SIZE as u16) as usize
-    }
-
     fn update_data_buffer(&mut self, value: u8) -> u8 {
         let result = self.data_buffer;
         self.data_buffer = value;
@@ -97,20 +90,10 @@ impl Ppu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
-        self.renderer.draw_background(
-            self.control.background_bank(),
-            &self.character_rom,
-            &self.palette_table,
-            &self.vram,
-        );
-
-        self.renderer.draw_sprites(
-            self.control.sprite_bank(),
-            &self.character_rom,
-            &self.palette_table,
-            &self.oam,
-        );
-
+        self.renderer
+            .draw_background(self.control.background_bank(), &self.vram);
+        self.renderer
+            .draw_sprites(self.control.sprite_bank(), &self.oam);
         self.renderer.update();
         tracing::info!("rendering frame");
     }
@@ -154,7 +137,7 @@ impl Ppu {
         self.increment_vram_address();
 
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
-            let result = self.character_rom[addr as usize];
+            let result = self.renderer.pattern_table[addr as usize];
             tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
             self.update_data_buffer(result)
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
@@ -163,7 +146,7 @@ impl Ppu {
             self.update_data_buffer(result)
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
             // TODO: This should set the data buffer to the nametable "below" the pattern table
-            let result = self.palette_table[self.mirror_palette_table(addr)];
+            let result = self.renderer.palette[addr.into()];
             tracing::debug!("palette RAM read at ${:04X}: ${:02X}", addr, result);
             result
         } else {
@@ -182,9 +165,8 @@ impl Ppu {
             self.vram[vram_index] = data;
             tracing::debug!("nametable write at ${:04X}: ${:02X}", vram_index, data);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
-            let palette_index = self.mirror_palette_table(addr);
-            self.palette_table[palette_index] = data;
-            tracing::debug!("palette RAM write at ${:04X}: ${:02X}", palette_index, data);
+            self.renderer.palette[addr.into()] = data;
+            tracing::debug!("palette RAM write of ${:02X}", data);
         } else if Self::PATTERN_TABLE_RANGE.contains(&addr) {
             tracing::error!(
                 "attempting to write to read-only character ROM at ${:04X}: ${:02X}",

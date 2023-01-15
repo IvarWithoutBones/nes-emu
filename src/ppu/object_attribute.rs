@@ -60,6 +60,24 @@ impl ObjectAttributeMemory {
     }
 }
 
+impl Default for ObjectAttributeMemory {
+    fn default() -> Self {
+        Self {
+            span: tracing::span!(tracing::Level::INFO, "ppu:oam"),
+            memory: [0; Self::MEMORY_SIZE],
+            address: 0,
+        }
+    }
+}
+
+impl Index<usize> for ObjectAttributeMemory {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.memory[index]
+    }
+}
+
 bitflags! {
     /*
         https://www.nesdev.org/wiki/PPU_OAM#Byte_2
@@ -126,23 +144,5 @@ impl<'a> Iterator for OamIterator<'a> {
             flip_horizontal,
             flip_vertical,
         })
-    }
-}
-
-impl Index<usize> for ObjectAttributeMemory {
-    type Output = u8;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.memory[index]
-    }
-}
-
-impl Default for ObjectAttributeMemory {
-    fn default() -> Self {
-        Self {
-            span: tracing::span!(tracing::Level::INFO, "ppu:oam"),
-            memory: [0; Self::MEMORY_SIZE],
-            address: 0,
-        }
     }
 }
