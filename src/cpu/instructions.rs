@@ -65,7 +65,8 @@ impl Instruction {
                 }
             }
         }
-        format!("{0: <3} {1: <6}", self.name, args,)
+
+        format!("{} {}", self.name, args,)
     }
 }
 
@@ -112,11 +113,12 @@ mod instruction_impls {
     }
 
     pub fn brk(cpu: &mut Cpu, _mode: &AdressingMode) {
-        cpu.push_word(cpu.program_counter.wrapping_add(1));
+        cpu.push_word(cpu.program_counter);
         cpu.push_byte(cpu.flags.bits());
 
-        cpu.program_counter = cpu.read_word(Cpu::BREAK_VECTOR);
         cpu.flags.insert(CpuFlags::Break);
+        cpu.flags.insert(CpuFlags::InterruptsDisabled);
+        cpu.program_counter = cpu.read_word(Cpu::BREAK_VECTOR);
     }
 
     pub fn jmp(cpu: &mut Cpu, mode: &AdressingMode) {
@@ -504,6 +506,18 @@ mod instruction_impls {
         tax(cpu, mode);
     }
 
+    pub fn las(cpu: &mut Cpu, mode: &AdressingMode) {
+        let (mut value, page_crossed) = mode.fetch_param(cpu);
+        value &= cpu.stack_pointer;
+
+        cpu.accumulator = value;
+        cpu.register_x = value;
+        cpu.stack_pointer = value;
+
+        cpu.update_zero_and_negative_flags(value);
+        cpu.tick_once_if(page_crossed);
+    }
+
     pub fn dcp(cpu: &mut Cpu, mode: &AdressingMode) {
         dec(cpu, mode);
         cmp(cpu, mode);
@@ -538,6 +552,17 @@ mod instruction_impls {
         and(cpu, mode);
         lsr(cpu, &AdressingMode::Accumulator);
     }
+
+    pub fn ane(cpu: &mut Cpu, mode: &AdressingMode) {
+        let value = mode.fetch_param(cpu).0;
+        cpu.accumulator = (cpu.accumulator & cpu.register_x) & value;
+        cpu.update_zero_and_negative_flags(cpu.accumulator);
+    }
+
+    pub fn anc(cpu: &mut Cpu, mode: &AdressingMode) {
+        and(cpu, mode);
+        cpu.flags.set(CpuFlags::Carry, cpu.flags.contains(CpuFlags::Negative));
+    }
 }
 
 // A macro to make defining instructions less verbose
@@ -556,7 +581,7 @@ macro_rules! instr {
 }
 
 #[rustfmt::skip]
-const INSTRUCTIONS: [Instruction; 65] = [
+const INSTRUCTIONS: [Instruction; 68] = [
     instr!("BRK", instruction_impls::brk, (0x00, 7, &AdressingMode::Implied)),
     instr!("RTI", instruction_impls::rti, (0x40, 6, &AdressingMode::Implied)),
 
@@ -596,13 +621,10 @@ const INSTRUCTIONS: [Instruction; 65] = [
 
     instr!("NOP", instruction_impls::nop,
         (0x80, 2, &AdressingMode::Immediate),
-        (0x0C, 4, &AdressingMode::Absolute),
-        (0x1C, 4, &AdressingMode::AbsoluteX),
-        (0x3C, 4, &AdressingMode::AbsoluteX),
-        (0x5C, 4, &AdressingMode::AbsoluteX),
-        (0x7C, 4, &AdressingMode::AbsoluteX),
-        (0xDC, 4, &AdressingMode::AbsoluteX),
-        (0xFC, 4, &AdressingMode::AbsoluteX),
+        (0x82, 2, &AdressingMode::Immediate),
+        (0x89, 2, &AdressingMode::Immediate),
+        (0xC2, 2, &AdressingMode::Immediate),
+        (0xE2, 2, &AdressingMode::Immediate),
         (0xEA, 2, &AdressingMode::Implied),
         (0x1A, 2, &AdressingMode::Implied),
         (0x3A, 2, &AdressingMode::Implied),
@@ -611,6 +633,13 @@ const INSTRUCTIONS: [Instruction; 65] = [
         (0xDA, 2, &AdressingMode::Implied),
         (0xFA, 2, &AdressingMode::Implied),
         (0xFA, 2, &AdressingMode::Implied),
+        (0x0C, 4, &AdressingMode::Absolute),
+        (0x1C, 4, &AdressingMode::AbsoluteX),
+        (0x3C, 4, &AdressingMode::AbsoluteX),
+        (0x5C, 4, &AdressingMode::AbsoluteX),
+        (0x7C, 4, &AdressingMode::AbsoluteX),
+        (0xDC, 4, &AdressingMode::AbsoluteX),
+        (0xFC, 4, &AdressingMode::AbsoluteX),
         (0x04, 3, &AdressingMode::ZeroPage),
         (0x44, 3, &AdressingMode::ZeroPage),
         (0x64, 3, &AdressingMode::ZeroPage),
@@ -812,7 +841,16 @@ const INSTRUCTIONS: [Instruction; 65] = [
 
     // Unofficial opcodes
 
+    instr!("ANE", instruction_impls::ane,
+        (0x8B, 2, &AdressingMode::Immediate)
+    ),
+
+    instr!("LAS", instruction_impls::las,
+        (0xBB, 4, &AdressingMode::AbsoluteY)
+    ),
+
     instr!("LAX", instruction_impls::lax,
+        (0xAB, 2, &AdressingMode::Immediate),
         (0xA7, 3, &AdressingMode::ZeroPage),
         (0xB7, 4, &AdressingMode::ZeroPageY),
         (0xAF, 4, &AdressingMode::Absolute),
@@ -890,5 +928,10 @@ const INSTRUCTIONS: [Instruction; 65] = [
 
     instr!("ALR", instruction_impls::alr,
         (0x4B, 2, &AdressingMode::Immediate)
+    ),
+
+    instr!("ANC", instruction_impls::anc,
+        (0x2B, 2, &AdressingMode::Immediate),
+        (0x0B, 2, &AdressingMode::Immediate)
     )
 ];

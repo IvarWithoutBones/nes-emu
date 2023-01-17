@@ -54,7 +54,7 @@ impl Input {
         }
 
         if let Err(e) = self.button_sender.send(button) {
-            tracing::error!("failed to send button to controller: {}", e);
+            // tracing::error!("failed to send button to controller: {}", e);
         }
     }
 }

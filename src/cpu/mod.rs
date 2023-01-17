@@ -66,8 +66,6 @@ impl Cpu {
         self.register_x = 0;
         self.register_y = 0;
 
-        // This is a hack to skip graphic init in nestest
-        // self.program_counter = 0xC000;
         self.program_counter = self.read_word(Cpu::RESET_VECTOR);
         tracing::info!("resetting. PC={:04X}", self.program_counter);
     }
@@ -91,7 +89,6 @@ impl Cpu {
     }
 
     pub fn push_word(&mut self, data: u16) {
-        // I dont understand why pushing in big-endian order makes the value be read in little-endian?
         for byte in u16::to_be_bytes(data) {
             self.push_byte(byte);
         }
@@ -146,14 +143,16 @@ impl Cpu {
             memory: self.bus.cpu_ram,
         };
 
+        tracing::debug!("{}  {}", self, state.instruction);
+
         let program_counter_prior = self.program_counter;
         (instr.function)(self, mode);
+
+        // TODO: This does not allow for loops that break using interrupts.
         if self.program_counter == program_counter_prior {
             // Some instructions (e.g. JMP) set the program counter themselves
             self.program_counter = self.program_counter.wrapping_add(mode.len());
         }
-
-        tracing::debug!("{}  {}", self, state.instruction);
 
         #[cfg(test)]
         if instr.name == "BRK" {

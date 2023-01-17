@@ -129,7 +129,8 @@ impl Memory for Bus {
                     register,
                     address
                 );
-                panic!()
+                0
+                // panic!()
             }
         } else {
             tracing::error!("unimplemented read at ${:04X}", address);
@@ -177,7 +178,7 @@ impl Memory for Bus {
                 address,
                 data
             );
-            panic!()
+            // panic!()
         } else {
             tracing::error!("unimplemented write at ${:04X}: ${:02X}", address, data);
             // panic!()
