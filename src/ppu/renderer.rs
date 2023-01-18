@@ -85,13 +85,12 @@ impl Renderer {
         }
     }
 
-    pub fn draw_background(&mut self, bank: usize, vram: &VideoRam) {
-        const ROWS_PER_NAMETABLE: usize = 30;
+    pub fn draw_background(&mut self, bank: usize, mut nametable_end: usize, vram: &VideoRam) {
         const TILES_PER_ROW: usize = 32;
-        // TODO: Assuming first nametable
-        let nametable_len = ROWS_PER_NAMETABLE * TILES_PER_ROW;
 
-        for i in 0..nametable_len {
+        // The last 64 bytes of the nametable are used for attribute tables
+        nametable_end -= 64;
+        for i in 0..nametable_end {
             let tile_x = i % TILES_PER_ROW;
             let tile_y = i / TILES_PER_ROW;
 
@@ -104,7 +103,7 @@ impl Renderer {
                 // Each byte represents a 2x2 tile area in the nametable.
                 let quad = Quadrant::from((tile_x, tile_y));
                 let attr_index = ((tile_y / 4) * 8) + (tile_x / 4);
-                let attr = vram[nametable_len + attr_index];
+                let attr = vram[nametable_end + attr_index];
 
                 let index = (attr >> quad as u8) & 0b11;
                 self.palette.background_entry(index as usize)

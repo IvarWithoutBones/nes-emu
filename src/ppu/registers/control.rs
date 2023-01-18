@@ -1,3 +1,4 @@
+use crate::util;
 use bitflags::bitflags;
 
 bitflags! {
@@ -21,7 +22,8 @@ bitflags! {
         +--------- Generate an NMI at the start of the vertical blanking interval (0: off; 1: on)
     */
     pub struct Control: u8 {
-        const NametableAddress             = 0b0000_0011;
+        const NametableLow                 = 0b0000_0001;
+        const NametableHigh                = 0b0000_0010;
         const VramAdressIncrement          = 0b0000_0100;
         const SpritePatternTableBank       = 0b0000_1000;
         const BackgroundPatternBank        = 0b0001_0000;
@@ -72,13 +74,18 @@ impl Control {
         }
     }
 
-    // pub fn base_nametable_addr(&self) -> usize {
-    //     match self.bits() & Self::NametableAddress.bits() {
-    //         0 => 0x2000,
-    //         1 => 0x2400,
-    //         2 => 0x2800,
-    //         3 => 0x2C00,
-    //         _ => unreachable!(),
-    //     }
-    // }
+    pub fn nametable_end(&self) -> usize {
+        let value = util::combine_bools(
+            self.contains(Self::NametableLow),
+            self.contains(Self::NametableHigh),
+        );
+
+        match value {
+            0 => 0x400,
+            1 => 0x800,
+            2 => 0xC00,
+            3 => 0x1000,
+            _ => unreachable!(),
+        }
+    }
 }

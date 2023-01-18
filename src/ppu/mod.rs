@@ -90,10 +90,14 @@ impl Ppu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
-        self.renderer
-            .draw_background(self.control.background_bank(), &self.vram);
+        self.renderer.draw_background(
+            self.control.background_bank(),
+            self.control.nametable_end(),
+            &self.vram,
+        );
         self.renderer
             .draw_sprites(self.control.sprite_bank(), &self.oam);
+
         self.renderer.update();
         tracing::info!("rendering frame");
     }
