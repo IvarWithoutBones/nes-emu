@@ -5,7 +5,7 @@ pub mod renderer;
 
 use super::bus::{Clock, CycleCount};
 use crate::cartridge::Mirroring;
-use object_attribute::ObjectAttributeMemory;
+use object_attribute::{Object, ObjectAttributeMemory};
 use registers::Register;
 use renderer::{PixelBuffer, Renderer};
 use std::{ops::RangeInclusive, sync::mpsc::Sender};
@@ -90,13 +90,18 @@ impl Ppu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
-        self.renderer.draw_background(
-            self.control.background_bank(),
-            self.control.nametable_end(),
-            &self.vram,
-        );
-        self.renderer
-            .draw_sprites(self.control.sprite_bank(), &self.oam);
+        if self.mask.show_background() {
+            self.renderer.draw_background(
+                self.control.background_bank(),
+                self.control.nametable_start(),
+                &self.vram,
+            );
+        }
+
+        if self.mask.show_sprites() {
+            self.renderer
+                .draw_sprites(self.control.sprite_bank(), &self.oam);
+        }
 
         self.renderer.update();
         tracing::info!("rendering frame");
@@ -226,6 +231,13 @@ impl Ppu {
         }
         result
     }
+
+    fn is_sprite_zero_hit(&self, cycle: usize) -> bool {
+        // TODO: This should check if a non-opaque BG pixel overlaps with a non-opaque sprite zero pixel,
+        // instead of triggering on any sprite zero pixel.
+        let obj = Object::from(&self.oam.memory[0..4]);
+        (obj.y == self.scanline as usize) && obj.x <= cycle && self.mask.show_sprites()
+    }
 }
 
 impl Clock for Ppu {
@@ -239,6 +251,10 @@ impl Clock for Ppu {
 
         self.cycles += cycles;
         if self.cycles >= CYCLES_PER_SCANLINE {
+            if self.is_sprite_zero_hit(self.cycles) {
+                self.status.set_sprite_zero(true);
+            }
+
             self.set_cycles(self.cycles - CYCLES_PER_SCANLINE);
             self.scanline += 1;
 
@@ -247,6 +263,7 @@ impl Clock for Ppu {
                 if self.control.nmi_at_vblank() {
                     self.trigger_nmi = true;
                 }
+                self.status.set_sprite_zero(false);
                 tracing::debug!("entering vblank, status: {}", self.status);
             }
 
@@ -255,6 +272,7 @@ impl Clock for Ppu {
                 self.scanline = 0;
                 self.trigger_nmi = false;
                 self.status.reset_vblank();
+                self.status.set_sprite_zero(false);
                 tracing::debug!("finished computing frame");
             }
         }

@@ -40,3 +40,13 @@ impl From<u8> for Mask {
         Self::from_bits_truncate(val)
     }
 }
+
+impl Mask {
+    pub fn show_background(&self) -> bool {
+        self.contains(Self::ShowBackground)
+    }
+
+    pub fn show_sprites(&self) -> bool {
+        self.contains(Self::ShowSprites)
+    }
+}

@@ -12,6 +12,7 @@ struct Opcode {
 pub struct Instruction {
     pub name: &'static str,
     pub function: fn(cpu: &mut Cpu, mode: &AdressingMode),
+    pub changes_program_counter: bool,
     opcodes: &'static [Opcode],
 }
 
@@ -492,7 +493,7 @@ mod instruction_impls {
     }
 
     /*
-        Unofficial/undocumented opcodes
+        Undocumented opcodes
     */
 
     pub fn sax(cpu: &mut Cpu, mode: &AdressingMode) {
@@ -571,6 +572,20 @@ macro_rules! instr {
         Instruction {
             name: $name,
             function: $function,
+            changes_program_counter: false,
+            opcodes: &[$(Opcode {
+                code: &$opcodes.0,
+                cycles: &$opcodes.1,
+                mode: &$opcodes.2,
+            }),*],
+        }
+    };
+
+    ($name: expr, $changes_pc: expr, $function: expr, $($opcodes: tt),*) => {
+        Instruction {
+            name: $name,
+            function: $function,
+            changes_program_counter: $changes_pc,
             opcodes: &[$(Opcode {
                 code: &$opcodes.0,
                 cycles: &$opcodes.1,
@@ -582,17 +597,17 @@ macro_rules! instr {
 
 #[rustfmt::skip]
 const INSTRUCTIONS: [Instruction; 68] = [
-    instr!("BRK", instruction_impls::brk, (0x00, 7, &AdressingMode::Implied)),
-    instr!("RTI", instruction_impls::rti, (0x40, 6, &AdressingMode::Implied)),
+    instr!("BRK", true, instruction_impls::brk, (0x00, 7, &AdressingMode::Implied)),
+    instr!("RTI", true, instruction_impls::rti, (0x40, 6, &AdressingMode::Implied)),
 
-    instr!("BCS", instruction_impls::bcs, (0xB0, 2, &AdressingMode::Relative)),
-    instr!("BCC", instruction_impls::bcc, (0x90, 2, &AdressingMode::Relative)),
-    instr!("BEQ", instruction_impls::beq, (0xF0, 2, &AdressingMode::Relative)),
-    instr!("BNE", instruction_impls::bne, (0xD0, 2, &AdressingMode::Relative)),
-    instr!("BMI", instruction_impls::bmi, (0x30, 2, &AdressingMode::Relative)),
-    instr!("BPL", instruction_impls::bpl, (0x10, 2, &AdressingMode::Relative)),
-    instr!("BVS", instruction_impls::bvs, (0x70, 2, &AdressingMode::Relative)),
-    instr!("BVC", instruction_impls::bvc, (0x50, 2, &AdressingMode::Relative)),
+    instr!("BCS", true, instruction_impls::bcs, (0xB0, 2, &AdressingMode::Relative)),
+    instr!("BCC", true, instruction_impls::bcc, (0x90, 2, &AdressingMode::Relative)),
+    instr!("BEQ", true, instruction_impls::beq, (0xF0, 2, &AdressingMode::Relative)),
+    instr!("BNE", true, instruction_impls::bne, (0xD0, 2, &AdressingMode::Relative)),
+    instr!("BMI", true, instruction_impls::bmi, (0x30, 2, &AdressingMode::Relative)),
+    instr!("BPL", true, instruction_impls::bpl, (0x10, 2, &AdressingMode::Relative)),
+    instr!("BVS", true, instruction_impls::bvs, (0x70, 2, &AdressingMode::Relative)),
+    instr!("BVC", true, instruction_impls::bvc, (0x50, 2, &AdressingMode::Relative)),
 
     instr!("CLV", instruction_impls::clv, (0xB8, 2, &AdressingMode::Implied)),
     instr!("CLC", instruction_impls::clc, (0x18, 2, &AdressingMode::Implied)),
@@ -610,8 +625,8 @@ const INSTRUCTIONS: [Instruction; 68] = [
         (0x89, 2, &AdressingMode::Implied)
     ),
 
-    instr!("JSR", instruction_impls::jsr, (0x20, 6, &AdressingMode::Absolute)),
-    instr!("RTS", instruction_impls::rts, (0x60, 6, &AdressingMode::Implied)),
+    instr!("JSR", true, instruction_impls::jsr, (0x20, 6, &AdressingMode::Absolute)),
+    instr!("RTS", true, instruction_impls::rts, (0x60, 6, &AdressingMode::Implied)),
     instr!("PHP", instruction_impls::php, (0x08, 3, &AdressingMode::Implied)),
     instr!("PLP", instruction_impls::plp, (0x28, 4, &AdressingMode::Implied)),
     instr!("PHA", instruction_impls::pha, (0x48, 3, &AdressingMode::Implied)),
@@ -656,7 +671,7 @@ const INSTRUCTIONS: [Instruction; 68] = [
         (0x2C, 4, &AdressingMode::Absolute)
     ),
 
-    instr!("JMP", instruction_impls::jmp,
+    instr!("JMP", true, instruction_impls::jmp,
         (0x4C, 3, &AdressingMode::Absolute),
         (0x6C, 5, &AdressingMode::Indirect)
     ),
@@ -839,7 +854,7 @@ const INSTRUCTIONS: [Instruction; 68] = [
         (0x8C, 4, &AdressingMode::Absolute)
     ),
 
-    // Unofficial opcodes
+    // Undocumented opcodes
 
     instr!("ANE", instruction_impls::ane,
         (0x8B, 2, &AdressingMode::Immediate)

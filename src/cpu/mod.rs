@@ -145,11 +145,8 @@ impl Cpu {
 
         tracing::debug!("{}  {}", self, state.instruction);
 
-        let program_counter_prior = self.program_counter;
         (instr.function)(self, mode);
-
-        // TODO: This does not allow for loops that break using interrupts.
-        if self.program_counter == program_counter_prior {
+        if !instr.changes_program_counter {
             // Some instructions (e.g. JMP) set the program counter themselves
             self.program_counter = self.program_counter.wrapping_add(mode.len());
         }

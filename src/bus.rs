@@ -111,6 +111,9 @@ impl Memory for Bus {
             self.controller.read()
         } else if PROGRAM_ROM_RANGE.contains(&address) {
             address -= PROGRAM_ROM_RANGE.start();
+            if self.cartridge.header.program_rom_pages == 1 {
+                address %= 0x4000;
+            }
             let result = self.cartridge.program_rom[address as usize];
             tracing::trace!("program ROM read at ${:04X}: ${:02X}", address, result);
             result

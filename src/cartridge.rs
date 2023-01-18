@@ -35,7 +35,7 @@ bitflags! {
 #[derive(Debug, Copy, Clone)]
 pub struct Header {
     pub mirroring: Mirroring,
-    program_rom_pages: usize,
+    pub program_rom_pages: usize,
     character_rom_pages: usize,
     has_trainer: bool,
     mapper: u8,
@@ -51,11 +51,11 @@ impl Header {
             return Err("Invalid ROM file".to_string());
         }
 
-        let flags_6 = Flags6::from_bits_truncate(data[6]);
-        let flags_7 = Flags7::from_bits_truncate(data[7]);
+        let flags_6 = Flags6::from_bits_retain(data[6]);
+        let flags_7 = Flags7::from_bits_retain(data[7]);
 
-        let mapper = flags_6.bits() & Flags6::MAPPER_LOW.bits()
-            | flags_7.bits() & Flags7::MAPPER_HIGH.bits();
+        let mapper = ((flags_6.bits() & Flags6::MAPPER_LOW.bits()) >> 4)
+            | (flags_7.bits() & Flags7::MAPPER_HIGH.bits());
 
         let mirroring = match (
             flags_6.contains(Flags6::FOUR_SCREEN),

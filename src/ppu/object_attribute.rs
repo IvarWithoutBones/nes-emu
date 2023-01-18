@@ -5,7 +5,7 @@ use std::ops::{Index, Range};
 /// https://www.nesdev.org/wiki/PPU_OAM
 pub struct ObjectAttributeMemory {
     span: tracing::Span,
-    memory: [u8; Self::MEMORY_SIZE],
+    pub memory: [u8; Self::MEMORY_SIZE],
     address: u8,
 }
 
@@ -109,6 +109,35 @@ pub struct Object {
     pub tile_index: usize,
 }
 
+impl From<&[u8]> for Object {
+    fn from(data: &[u8]) -> Self {
+        let attrs = ObjectAttrs::from_bits_truncate(data[2]);
+        let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
+        let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
+        let behind_background = attrs.contains(ObjectAttrs::Priority);
+
+        // TODO: Ignoring 8x16 sprites for now
+        let tile_index = data[1] as usize;
+        let palette_index = util::combine_bools(
+            attrs.contains(ObjectAttrs::Palette1),
+            attrs.contains(ObjectAttrs::Palette2),
+        ) as usize;
+
+        let x = data[3] as usize;
+        let y = data[0] as usize;
+
+        Self {
+            x,
+            y,
+            flip_horizontal,
+            flip_vertical,
+            behind_background,
+            palette_index,
+            tile_index,
+        }
+    }
+}
+
 pub struct OamIterator<'a> {
     oam: &'a ObjectAttributeMemory,
     index: usize,
@@ -121,31 +150,7 @@ impl<'a> Iterator for OamIterator<'a> {
         if self.index >= ObjectAttributeMemory::MEMORY_SIZE {
             return None;
         }
-
-        let attrs = ObjectAttrs::from_bits_truncate(self.oam[self.index + 2]);
-        let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
-        let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
-        let behind_background = attrs.contains(ObjectAttrs::Priority);
-
-        // TODO: Ignoring 8x16 sprites for now
-        let tile_index = self.oam[self.index + 1] as usize;
-        let palette_index = util::combine_bools(
-            attrs.contains(ObjectAttrs::Palette1),
-            attrs.contains(ObjectAttrs::Palette2),
-        ) as usize;
-
-        let x = self.oam[self.index + 3] as usize;
-        let y = self.oam[self.index] as usize;
-
         self.index += 4;
-        Some(Object {
-            x,
-            y,
-            tile_index,
-            palette_index,
-            flip_horizontal,
-            flip_vertical,
-            behind_background,
-        })
+        Some(Object::from(&self.oam.memory[self.index - 4..self.index]))
     }
 }

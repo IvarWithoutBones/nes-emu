@@ -74,17 +74,17 @@ impl Control {
         }
     }
 
-    pub fn nametable_end(&self) -> usize {
+    pub fn nametable_start(&self) -> usize {
         let value = util::combine_bools(
-            self.contains(Self::NametableLow),
             self.contains(Self::NametableHigh),
+            self.contains(Self::NametableLow),
         );
 
         match value {
-            0 => 0x400,
-            1 => 0x800,
-            2 => 0xC00,
-            3 => 0x1000,
+            0 => 0x2000,
+            1 => 0x2400,
+            2 => 0x2800,
+            3 => 0x2C00,
             _ => unreachable!(),
         }
     }

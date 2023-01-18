@@ -45,7 +45,7 @@ impl std::fmt::Display for Status {
 }
 
 impl Status {
-    pub fn read(&mut self) -> u8 {
+    pub fn read(&self) -> u8 {
         self.bits()
     }
 
@@ -59,5 +59,13 @@ impl Status {
 
     pub fn in_vblank(&mut self) -> bool {
         self.contains(Self::VBlankStarted)
+    }
+
+    pub fn set_sprite_zero(&mut self, value: bool) {
+        if value {
+            self.insert(Self::SpriteZeroHit);
+        } else {
+            self.remove(Self::SpriteZeroHit);
+        }
     }
 }
