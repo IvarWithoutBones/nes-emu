@@ -87,9 +87,9 @@ impl Bus {
         Self::from_cart(button_receiver, pixel_sender, cartridge)
     }
 
-    const fn to_cpu_ram_address(address: u16) -> usize {
+    const fn to_cpu_ram_address(address: u16) -> u16 {
         // Addressing is 11 bits, so we need to mask the top 5 off
-        (address & 0b0000_0111_1111_1111) as usize
+        address & 0b0000_0111_1111_1111
     }
 
     /// Generate a dummy bus, used for tests
@@ -106,18 +106,18 @@ impl Bus {
 
 impl Memory for Bus {
     #[tracing::instrument(skip(self, address), parent = &self.span)]
-    fn read_byte(&mut self, address: u16) -> u8 {
+    fn read_byte(&mut self, mut address: u16) -> u8 {
         if CONTROLLER_RANGE.contains(&address) {
             self.controller.read()
         } else if PROGRAM_ROM_RANGE.contains(&address) {
-            let addr = (address - PROGRAM_ROM_RANGE.start()) % 0x4000;
-            let result = self.cartridge.program_rom[addr as usize];
-            tracing::trace!("program ROM read at ${:04X}: ${:02X}", addr, result);
+            address -= PROGRAM_ROM_RANGE.start();
+            let result = self.cartridge.program_rom[address as usize];
+            tracing::trace!("program ROM read at ${:04X}: ${:02X}", address, result);
             result
         } else if CPU_RAM_RANGE.contains(&address) {
-            let addr = Self::to_cpu_ram_address(address);
-            let result = self.cpu_ram[addr];
-            tracing::trace!("CPU RAM read at ${:04X}: ${:02X}", addr, result);
+            address = Self::to_cpu_ram_address(address);
+            let result = self.cpu_ram[address as usize];
+            tracing::trace!("CPU RAM read at ${:04X}: ${:02X}", address, result);
             result
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.readable() {
@@ -140,13 +140,13 @@ impl Memory for Bus {
     }
 
     #[tracing::instrument(skip(self, address, data), parent = &self.span)]
-    fn write_byte(&mut self, address: u16, data: u8) {
+    fn write_byte(&mut self, mut address: u16, data: u8) {
         if CONTROLLER_RANGE.contains(&address) {
             self.controller.write(data);
         } else if CPU_RAM_RANGE.contains(&address) {
-            let addr = Self::to_cpu_ram_address(address);
-            tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", addr, data);
-            self.cpu_ram[addr] = data;
+            address = Self::to_cpu_ram_address(address);
+            tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", address, data);
+            self.cpu_ram[address as usize] = data;
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.writable() {
                 tracing::trace!(

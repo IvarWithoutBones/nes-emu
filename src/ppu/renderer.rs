@@ -119,6 +119,10 @@ impl Renderer {
 
     pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
         for object in oam.iter() {
+            if object.behind_background {
+                continue;
+            }
+
             let tile = self.get_tile(bank, object.tile_index);
             let palette = self.palette.sprite_entry(object.palette_index);
 

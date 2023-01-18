@@ -104,6 +104,7 @@ pub struct Object {
     pub y: usize,
     pub flip_horizontal: bool,
     pub flip_vertical: bool,
+    pub behind_background: bool,
     pub palette_index: usize,
     pub tile_index: usize,
 }
@@ -124,6 +125,7 @@ impl<'a> Iterator for OamIterator<'a> {
         let attrs = ObjectAttrs::from_bits_truncate(self.oam[self.index + 2]);
         let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
         let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
+        let behind_background = attrs.contains(ObjectAttrs::Priority);
 
         // TODO: Ignoring 8x16 sprites for now
         let tile_index = self.oam[self.index + 1] as usize;
@@ -143,6 +145,7 @@ impl<'a> Iterator for OamIterator<'a> {
             palette_index,
             flip_horizontal,
             flip_vertical,
+            behind_background,
         })
     }
 }

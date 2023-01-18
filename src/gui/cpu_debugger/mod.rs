@@ -101,6 +101,17 @@ impl CpuDebugger {
         self.cpu_states.get(selected_index)
     }
 
+    pub fn toggle_pause(&mut self) {
+        self.step_state.paused = !self.step_state.paused;
+        self.step_sender.send(self.step_state.clone()).unwrap();
+    }
+
+    pub fn step(&mut self) {
+        self.step_state.paused = true;
+        self.step_state.step = true;
+        self.step_sender.send(self.step_state.clone()).unwrap();
+    }
+
     pub fn update_buffer(&mut self) {
         // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {

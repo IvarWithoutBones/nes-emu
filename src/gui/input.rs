@@ -16,6 +16,14 @@ impl Input {
         }
     }
 
+    pub fn toggle_pause(&self, ctx: &egui::Context) -> bool {
+        ctx.input().key_pressed(egui::Key::P)
+    }
+
+    pub fn step(&self, ctx: &egui::Context) -> bool {
+        ctx.input().key_pressed(egui::Key::O)
+    }
+
     // TODO: This is very, very ugly
     #[tracing::instrument(skip(self, ctx), parent = &self.span)]
     pub fn update(&self, ctx: &egui::Context) {

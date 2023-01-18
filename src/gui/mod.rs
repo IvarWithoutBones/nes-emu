@@ -2,12 +2,12 @@ pub mod cpu_debugger;
 mod input;
 mod screen;
 
+use self::input::Input;
 use crate::{controller, cpu::CpuState, ppu::renderer::PixelBuffer};
 use cpu_debugger::{step_state::StepState, CpuDebugger};
 use eframe::egui;
 use screen::Screen;
 use std::sync::mpsc::{Receiver, Sender};
-use self::input::Input;
 
 #[derive(PartialEq)]
 enum View {
@@ -103,6 +103,14 @@ impl eframe::App for Gui {
         self.input.update(ctx);
         self.screen.update_buffer(ctx);
         self.cpu_debugger.update_buffer();
+
+        if self.input.toggle_pause(ctx) {
+            self.cpu_debugger.toggle_pause();
+        }
+
+        if self.input.step(ctx) {
+            self.cpu_debugger.step();
+        }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             self.menu_bar(ui);
