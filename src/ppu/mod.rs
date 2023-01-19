@@ -93,7 +93,10 @@ impl Ppu {
         if self.mask.show_background() {
             self.renderer.draw_background(
                 self.control.background_bank(),
+                self.scroll.x,
+                self.scroll.y,
                 self.control.nametable_start(),
+                &self.mirroring,
                 &self.vram,
             );
         }

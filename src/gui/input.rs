@@ -61,7 +61,7 @@ impl Input {
             button |= controller::Buttons::Down;
         }
 
-        if let Err(e) = self.button_sender.send(button) {
+        if let Err(_e) = self.button_sender.send(button) {
             // tracing::error!("failed to send button to controller: {}", e);
         }
     }

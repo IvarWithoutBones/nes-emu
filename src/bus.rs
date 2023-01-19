@@ -200,6 +200,12 @@ impl Clock for Bus {
 
         if !vblank_before && vblank_after {
             self.ppu.render();
+
+            // This is a hack to ensure we dont send too many frames to the renderer at once, locking up the GUI.
+            // TODO: Should be removed when proper timing is implemented.
+            if cfg!(not(debug_assertions)) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
     }
 
