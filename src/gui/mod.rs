@@ -7,7 +7,10 @@ use crate::{controller, cpu::CpuState, ppu::renderer::PixelBuffer};
 use cpu_debugger::{step_state::StepState, CpuDebugger};
 use eframe::egui;
 use screen::Screen;
-use std::sync::mpsc::{Receiver, Sender};
+use std::{
+    path::PathBuf,
+    sync::mpsc::{Receiver, Sender},
+};
 
 #[derive(PartialEq)]
 enum View {
@@ -21,6 +24,7 @@ pub struct Gui {
     cpu_debugger: CpuDebugger,
     current_view: View,
     input: Input,
+    rom_sender: Sender<PathBuf>,
 }
 
 impl Gui {
@@ -30,9 +34,11 @@ impl Gui {
         step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
+        rom_sender: Sender<PathBuf>,
     ) -> Self {
         Self {
             span,
+            rom_sender,
             screen: Screen::new(pixel_receiver),
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
@@ -44,6 +50,7 @@ impl Gui {
         window_title: &str,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
+        rom_sender: Sender<PathBuf>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) {
@@ -59,17 +66,45 @@ impl Gui {
                     step_sender,
                     button_sender,
                     pixel_receiver,
+                    rom_sender,
                 ))
             }),
         );
     }
 
+    fn send_rom_path(&mut self, path: PathBuf) {
+        tracing::info!("opening ROM file: {}", path.display());
+        self.rom_sender.send(path).unwrap_or_else(|err| {
+            tracing::error!("failed to send ROM path: {}", err);
+        });
+    }
+
+    fn update_dropped_files(&mut self, ctx: &egui::Context) {
+        for file in &ctx.input().raw.dropped_files.iter().last() {
+            if let Some(path) = &file.path {
+                if path.extension().unwrap_or_default() == "nes" {
+                    self.send_rom_path(path.to_path_buf());
+                } else {
+                    tracing::warn!(
+                        "dropped file '{}' does not have a .nes file extension! ignoring",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
-                let open_file = ui.button("Open").on_hover_text("TODO");
+                let open_file = ui.button("Open").on_hover_text("Open a ROM file");
                 if open_file.clicked() {
-                    tracing::warn!("Open file is not implemented");
+                    if let Some(file) = rfd::FileDialog::new()
+                        .add_filter("NES ROM", &["nes"])
+                        .pick_file()
+                    {
+                        self.send_rom_path(file);
+                    }
                 }
 
                 let quit = ui.button("Quit").on_hover_text("Exit the application");
@@ -103,6 +138,7 @@ impl eframe::App for Gui {
         self.input.update(ctx);
         self.screen.update_buffer(ctx);
         self.cpu_debugger.update_buffer();
+        self.update_dropped_files(ctx);
 
         if self.input.toggle_pause(ctx) {
             self.cpu_debugger.toggle_pause();

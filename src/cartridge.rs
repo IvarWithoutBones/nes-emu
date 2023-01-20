@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use std::fmt;
+use std::{fmt, path::PathBuf};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Mirroring {
@@ -161,5 +161,23 @@ impl Cartridge {
         );
         program[len] = 0x00; // BRK
         Self::from_bytes(&program)
+    }
+}
+
+impl From<PathBuf> for Cartridge {
+    fn from(path: PathBuf) -> Self {
+        let data = std::fs::read(&path).unwrap_or_else(|err| {
+            tracing::error!("failed to read file \"{}\": \"{}\"", path.display(), err);
+            std::process::exit(1);
+        });
+
+        Cartridge::from_bytes(&data).unwrap_or_else(|err| {
+            tracing::error!(
+                "failed to load cartridge from \"{}\": \"{}\"",
+                path.display(),
+                err
+            );
+            std::process::exit(1);
+        })
     }
 }

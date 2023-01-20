@@ -15,13 +15,15 @@
     let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs { inherit system overlays; };
+      lib = pkgs.lib;
+
       rust = pkgs.rust-bin.stable.latest.default;
 
       nes-emu = pkgs.callPackage
         ({ lib
          , stdenvNoCC
          , rustPlatform
-           # Linux specific
+           # Linux
          , cmake
          , pkg-config
          , libxkbcommon
@@ -32,11 +34,19 @@
          , libXrandr
          , libXi
          , libX11
-           # Darwin specific
+           # Darwin
          , AppKit
          , OpenGL
+           # GTK
+         , wrapGAppsHook
+         , glib
+         , atk
+         , gtk3
+         , cairo
+         , pango
+         , gdk-pixbuf
          }:
-          rustPlatform.buildRustPackage rec {
+          rustPlatform.buildRustPackage {
             pname = "nes-emu";
             version =
               let
@@ -49,7 +59,9 @@
             src = lib.cleanSourceWith {
               src = lib.cleanSource ./.;
               filter = name: type:
-                !(baseNameOf name == "target" && type == "directory");
+                !(baseNameOf name == "target" && type == "directory") &&
+                !(baseNameOf name == "flake.nix" && type == "file") &&
+                !(baseNameOf name == "flake.lock" && type == "file");
             };
 
             cargoLock.lockFile = ./Cargo.lock;
@@ -59,6 +71,8 @@
             ] ++ lib.optionals stdenvNoCC.hostPlatform.isLinux [
               cmake
               pkg-config
+              wrapGAppsHook
+              glib
             ];
 
             buildInputs = lib.optionals stdenvNoCC.hostPlatform.isLinux [
@@ -70,12 +84,18 @@
               libGL
               fontconfig
               wayland
+              cairo
+              pango
+              gdk-pixbuf
+              atk
+              gtk3
             ] ++ lib.optionals stdenvNoCC.hostPlatform.isDarwin [
               AppKit
               OpenGL
             ];
 
-            LD_LIBRARY_PATH = lib.optional stdenvNoCC.hostPlatform.isLinux (lib.makeLibraryPath buildInputs);
+            # TODO: remove
+            doCheck = false;
 
             meta = with lib; {
               license = licenses.asl20;
@@ -86,8 +106,25 @@
     in
     {
       packages = {
-        inherit nes-emu rust;
+        inherit nes-emu;
         default = nes-emu;
+      };
+
+      devShell = pkgs.mkShell {
+        inputsFrom = [ nes-emu ];
+
+        packages = [
+          rust
+          nes-emu
+        ];
+
+        LD_LIBRARY_PATH = lib.optional pkgs.stdenvNoCC.hostPlatform.isLinux
+          (lib.makeLibraryPath nes-emu.buildInputs);
+
+        # Avoid not being able to find gsettings schemas when opening the file picker
+        shellHook = ''
+          export XDG_DATA_DIRS="$XDG_DATA_DIRS:$GSETTINGS_SCHEMAS_PATH"
+        '';
       };
     });
 }

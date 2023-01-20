@@ -3,6 +3,7 @@ use crate::controller;
 use crate::ppu::renderer::PixelBuffer;
 use crate::ppu::{self, *};
 use std::ops::RangeInclusive;
+use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 pub const CPU_RAM_SIZE: usize = 2048;
@@ -48,43 +49,44 @@ pub trait Memory {
 
 pub struct Bus {
     span: tracing::Span,
-    pub cartridge: Cartridge,
+    pub cartridge: Option<Cartridge>,
     pub cpu_ram: [u8; CPU_RAM_SIZE],
     pub cycles: CycleCount,
     pub ppu: Ppu,
     pub controller: controller::Controller,
+    rom_receiver: Receiver<PathBuf>,
 }
 
 impl Bus {
-    fn from_cart(
+    pub fn new(
         button_receiver: Receiver<controller::Buttons>,
         pixel_sender: Sender<Box<PixelBuffer>>,
-        cart: Cartridge,
+        rom_receiver: Receiver<PathBuf>,
     ) -> Bus {
         let span = tracing::span!(tracing::Level::INFO, "bus");
         tracing::info!("succesfully initialized");
         Bus {
             span,
-            cartridge: cart.clone(),
-            ppu: Ppu::new(pixel_sender, cart.character_rom, cart.header.mirroring),
+            rom_receiver,
+            cartridge: None,
+            ppu: Ppu::new(pixel_sender),
             cpu_ram: [0; CPU_RAM_SIZE],
             cycles: 0,
             controller: controller::Controller::new(button_receiver),
         }
     }
 
-    pub fn new(
-        button_receiver: Receiver<controller::Buttons>,
-        pixel_sender: Sender<Box<PixelBuffer>>,
-        rom_data: &[u8],
-    ) -> Self {
-        // Should the CPU be initialized here as well?
-        let cartridge = Cartridge::from_bytes(rom_data).unwrap_or_else(|err| {
-            tracing::error!("failed to load cartridge: \"{}\"", err);
-            std::process::exit(1);
-        });
+    fn load_cartridge(&mut self, cartridge: Cartridge) {
+        self.ppu.load_cartridge(&cartridge);
+        self.cartridge = Some(cartridge);
+    }
 
-        Self::from_cart(button_receiver, pixel_sender, cartridge)
+    pub fn has_cartridge(&mut self) -> bool {
+        if let Ok(path) = self.rom_receiver.try_recv() {
+            let cartridge = Cartridge::from(path);
+            self.load_cartridge(cartridge);
+        }
+        self.cartridge.is_some()
     }
 
     const fn to_cpu_ram_address(address: u16) -> u16 {
@@ -99,8 +101,9 @@ impl Bus {
             tracing::error!("failed to load cartridge: \"{}\"", err);
             std::process::exit(1);
         });
-
-        Self::from_cart(channel().1, channel().0, cartridge)
+        let mut bus = Self::new(channel().1, channel().0, channel().1);
+        bus.load_cartridge(cartridge);
+        bus
     }
 }
 
@@ -111,10 +114,11 @@ impl Memory for Bus {
             self.controller.read()
         } else if PROGRAM_ROM_RANGE.contains(&address) {
             address -= PROGRAM_ROM_RANGE.start();
-            if self.cartridge.header.program_rom_pages == 1 {
+            let cart = self.cartridge.as_ref().unwrap();
+            if cart.header.program_rom_pages == 1 {
                 address %= 0x4000;
             }
-            let result = self.cartridge.program_rom[address as usize];
+            let result = cart.program_rom[address as usize];
             tracing::trace!("program ROM read at ${:04X}: ${:02X}", address, result);
             result
         } else if CPU_RAM_RANGE.contains(&address) {

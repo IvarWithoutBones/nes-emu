@@ -211,6 +211,11 @@ pub fn spawn_thread(
     std::thread::spawn(move || {
         let mut step_state = StepState::default();
         let mut cpu = Cpu::new(bus);
+
+        while !cpu.bus.has_cartridge() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         cpu.reset();
 
         loop {
