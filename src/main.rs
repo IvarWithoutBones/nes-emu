@@ -11,16 +11,6 @@ use clap::Parser;
 use gui::Gui;
 use std::sync::mpsc::channel;
 
-fn tracing_init(log_level: Option<String>) {
-    let log_level = log_level.unwrap_or_else(|| "debug".to_string());
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(log_level)
-        .with_target(false) // Dont display 'nes_emu' for every span
-        .without_time()
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set default subscriber");
-}
-
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
 struct Args {
@@ -34,6 +24,23 @@ struct Args {
     // Without the GUI framework cluttering logs: '--log-level tracing,eframe=info'
     #[arg(short, long)]
     log_level: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tracing_init(log_level: Option<String>) {
+    let log_level = log_level.unwrap_or_else(|| "debug".to_string());
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(log_level)
+        .with_target(false) // Dont display 'nes_emu' for every span
+        .without_time()
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set default subscriber");
+}
+
+#[cfg(target_arch = "wasm32")]
+fn tracing_init(_log_level: Option<String>) {
+    console_error_panic_hook::set_once();
+    tracing_wasm::set_as_global_default();
 }
 
 fn main() {
@@ -64,6 +71,7 @@ fn main() {
     let bus: Bus = Bus::new(button_receiver, pixel_sender, rom_receiver);
 
     // Boot up the CPU
+    #[cfg(not(target_arch = "wasm32"))]
     let cpu_handle = cpu::spawn_thread(bus, state_sender, step_receiver);
 
     if let Some(rom) = args.rom {
@@ -81,9 +89,13 @@ fn main() {
             rom_sender,
             button_sender,
             pixel_receiver,
+
+            #[cfg(target_arch = "wasm32")]
+            bus,
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     if cpu_handle.join().is_err() {
         tracing::error!("CPU thread panicked");
     };

@@ -12,6 +12,9 @@ use std::{
     sync::mpsc::{Receiver, Sender},
 };
 
+#[cfg(target_arch = "wasm32")]
+use crate::cpu::{self, Cpu};
+
 #[derive(PartialEq)]
 enum View {
     Screen,
@@ -25,6 +28,10 @@ pub struct Gui {
     current_view: View,
     input: Input,
     rom_sender: Sender<PathBuf>,
+
+    // Multithreading is not supported in wasm32, so we have to run the CPU from this thread
+    #[cfg(target_arch = "wasm32")]
+    cpu: Cpu,
 }
 
 impl Gui {
@@ -35,6 +42,8 @@ impl Gui {
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
         rom_sender: Sender<PathBuf>,
+
+        #[cfg(target_arch = "wasm32")] bus: crate::bus::Bus,
     ) -> Self {
         Self {
             span,
@@ -43,9 +52,13 @@ impl Gui {
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
             input: Input::new(button_sender),
+
+            #[cfg(target_arch = "wasm32")]
+            cpu: cpu::Cpu::new(bus),
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(
         window_title: &str,
         cpu_state_receiver: Receiver<Box<CpuState>>,
@@ -72,6 +85,39 @@ impl Gui {
         );
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn run(
+        _window_title: &str,
+        cpu_state_receiver: Receiver<Box<CpuState>>,
+        step_sender: Sender<StepState>,
+        rom_sender: Sender<PathBuf>,
+        button_sender: Sender<controller::Buttons>,
+        pixel_receiver: Receiver<Box<PixelBuffer>>,
+        bus: crate::bus::Bus,
+    ) {
+        let span = tracing::span!(tracing::Level::INFO, "gui");
+        let options = eframe::WebOptions::default();
+        wasm_bindgen_futures::spawn_local(async {
+            eframe::start_web(
+                "egui_canvas_id",
+                options,
+                Box::new(|_cc| {
+                    Box::new(Self::new(
+                        span,
+                        cpu_state_receiver,
+                        step_sender,
+                        button_sender,
+                        pixel_receiver,
+                        rom_sender,
+                        bus,
+                    ))
+                }),
+            )
+            .await
+            .expect("failed to start eframe");
+        });
+    }
+
     fn send_rom_path(&mut self, path: PathBuf) {
         tracing::info!("opening ROM file: {}", path.display());
         self.rom_sender.send(path).unwrap_or_else(|err| {
@@ -91,6 +137,14 @@ impl Gui {
                     );
                 }
             }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                use crate::cartridge::Cartridge;
+                tracing::info!("opening ROM file: {}", file.name);
+                let cart = Cartridge::from_bytes(&*file.bytes.as_ref().unwrap()).unwrap();
+                self.cpu.bus.load_cartridge(cart);
+            }
         }
     }
 
@@ -99,6 +153,8 @@ impl Gui {
             ui.menu_button("File", |ui| {
                 let open_file = ui.button("Open").on_hover_text("Open a ROM file");
                 if open_file.clicked() {
+                    // TODO: use the async file dialog for WASI targets
+                    #[cfg(not(target_arch = "wasm32"))]
                     if let Some(file) = rfd::FileDialog::new()
                         .add_filter("NES ROM", &["nes"])
                         .pick_file()
@@ -133,6 +189,15 @@ impl Gui {
 impl eframe::App for Gui {
     #[tracing::instrument(skip(self, ctx, _frame), parent = &self.span)]
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if self.cpu.bus.has_cartridge() {
+                for i in 0..20 {
+                    self.cpu.step();
+                }
+            }
+        }
+
         // Not updating the buffers will cause a memory leak because the MPSC channels wont be emptied.
         // TODO: Switch to a bounded crossbeam channel to avoid this.
         self.input.update(ctx);

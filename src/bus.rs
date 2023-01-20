@@ -76,7 +76,7 @@ impl Bus {
         }
     }
 
-    fn load_cartridge(&mut self, cartridge: Cartridge) {
+    pub fn load_cartridge(&mut self, cartridge: Cartridge) {
         self.ppu.load_cartridge(&cartridge);
         self.cartridge = Some(cartridge);
     }
@@ -207,7 +207,7 @@ impl Clock for Bus {
 
             // This is a hack to ensure we dont send too many frames to the renderer at once, locking up the GUI.
             // TODO: Should be removed when proper timing is implemented.
-            if cfg!(not(debug_assertions)) {
+            if cfg!(not(debug_assertions)) && cfg!(not(target_arch = "wasm32")) {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }

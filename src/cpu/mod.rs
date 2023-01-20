@@ -156,7 +156,7 @@ impl Cpu {
             return None;
         }
 
-        self.tick(*cycles as usize);
+        self.tick(*cycles);
         Some(Box::new(state))
     }
 }
@@ -203,6 +203,7 @@ impl fmt::Display for Cpu {
 }
 
 /// Spawn and run the CPU in a separate thread
+#[cfg(not(target_arch = "wasm32"))]
 pub fn spawn_thread(
     bus: Bus,
     state_sender: Option<Sender<Box<CpuState>>>,

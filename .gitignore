@@ -11,3 +11,6 @@
 # Emulator
 /roms
 *.log
+
+# WASI
+/dist

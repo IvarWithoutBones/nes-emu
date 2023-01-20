@@ -15,13 +15,16 @@
     let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs { inherit system overlays; };
+      hostPlatform = pkgs.stdenvNoCC.hostPlatform;
       lib = pkgs.lib;
 
-      rust = pkgs.rust-bin.stable.latest.default;
+      # Enable WASI cross compiling support
+      rust = pkgs.rust-bin.stable.latest.default.override {
+        targets = [ "wasm32-unknown-unknown" hostPlatform.config ];
+      };
 
       nes-emu = pkgs.callPackage
         ({ lib
-         , stdenvNoCC
          , rustPlatform
            # Linux
          , cmake
@@ -68,14 +71,14 @@
 
             nativeBuildInputs = [
               rust
-            ] ++ lib.optionals stdenvNoCC.hostPlatform.isLinux [
+            ] ++ lib.optionals hostPlatform.isLinux [
               cmake
               pkg-config
               wrapGAppsHook
               glib
             ];
 
-            buildInputs = lib.optionals stdenvNoCC.hostPlatform.isLinux [
+            buildInputs = lib.optionals hostPlatform.isLinux [
               libX11
               libXrandr
               libXcursor
@@ -89,7 +92,7 @@
               gdk-pixbuf
               atk
               gtk3
-            ] ++ lib.optionals stdenvNoCC.hostPlatform.isDarwin [
+            ] ++ lib.optionals hostPlatform.isDarwin [
               AppKit
               OpenGL
             ];
@@ -114,11 +117,11 @@
         inputsFrom = [ nes-emu ];
 
         packages = [
+          pkgs.trunk
           rust
-          nes-emu
         ];
 
-        LD_LIBRARY_PATH = lib.optional pkgs.stdenvNoCC.hostPlatform.isLinux
+        LD_LIBRARY_PATH = lib.optional hostPlatform.isLinux
           (lib.makeLibraryPath nes-emu.buildInputs);
 
         # Avoid not being able to find gsettings schemas when opening the file picker
