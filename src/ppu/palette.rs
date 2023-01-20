@@ -38,8 +38,13 @@ impl Palette {
         PALETTE_TABLE[palette[index] as usize]
     }
 
-    const fn mirror(addr: usize) -> usize {
-        (addr % PALETTE_TABLE_LEN) as usize
+    const fn mirror(mut addr: usize) -> usize {
+        addr %= PALETTE_TABLE_LEN;
+        // A few entries are mirrored seemingly without reasoning
+        match addr {
+            0x10 | 0x14 | 0x18 | 0x1C => addr - 0x10,
+            _ => addr,
+        }
     }
 }
 
