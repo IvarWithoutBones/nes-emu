@@ -25,7 +25,7 @@ impl Palette {
 
     pub fn sprite_entry(&self, index: usize) -> PaletteEntry {
         // The palette table starts at 0x3F00 but the sprite entries do at 0x3F11
-        let start = 0x11 + (index * PALETTE_ENTRY_LEN) as usize;
+        let start = 0x11 + (index * PALETTE_ENTRY_LEN);
         [
             0, // Transparant
             self[start],

@@ -19,9 +19,7 @@ type ScanlineCount = u16;
 pub struct Ppu {
     span: tracing::Span,
     pub renderer: Renderer,
-
     mirroring: Option<Mirroring>,
-    pattern_table: Option<Vec<u8>>,
 
     data_buffer: u8,
     vram: VideoRam,
@@ -47,9 +45,7 @@ impl Ppu {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
             renderer: Renderer::new(pixel_sender),
-
             mirroring: None,
-            pattern_table: None,
 
             data_buffer: 0,
             vram: [0; VIDEO_RAM_SIZE],
@@ -69,7 +65,7 @@ impl Ppu {
 
     pub fn load_cartridge(&mut self, cartridge: &Cartridge) {
         self.mirroring = Some(cartridge.header.mirroring);
-        self.pattern_table = Some(cartridge.character_rom.clone());
+        self.renderer.pattern_table = Some(cartridge.character_rom.clone());
     }
 
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
@@ -103,16 +99,12 @@ impl Ppu {
                 self.control.nametable_start(),
                 &self.mirroring.unwrap(),
                 &self.vram,
-                self.pattern_table.as_ref().unwrap(),
             );
         }
 
         if self.mask.show_sprites() {
-            self.renderer.draw_sprites(
-                self.control.sprite_bank(),
-                &self.oam,
-                self.pattern_table.as_ref().unwrap(),
-            );
+            self.renderer
+                .draw_sprites(self.control.sprite_bank(), &self.oam);
         }
 
         self.renderer.update();
@@ -158,7 +150,7 @@ impl Ppu {
         self.increment_vram_address();
 
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
-            let result = self.pattern_table.as_ref().unwrap()[addr as usize];
+            let result = self.renderer.pattern_table.as_ref().unwrap()[addr as usize];
             tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
             self.update_data_buffer(result)
         } else if Self::NAMETABLE_RANGE.contains(&addr) {

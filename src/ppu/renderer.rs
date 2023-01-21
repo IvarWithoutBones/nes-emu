@@ -20,6 +20,7 @@ pub struct Renderer {
     pixel_sender: Sender<Box<PixelBuffer>>,
     pixels: Box<PixelBuffer>,
     pub palette: Palette,
+    pub pattern_table: Option<Vec<u8>>,
 }
 
 impl Renderer {
@@ -29,6 +30,7 @@ impl Renderer {
             // pattern_table,
             pixels: Box::new([0; PIXEL_BUFFER_LEN]),
             palette: Palette::default(),
+            pattern_table: None,
         }
     }
 
@@ -49,12 +51,12 @@ impl Renderer {
         self.pixels[base..base + RGB_LEN].copy_from_slice([color.0, color.1, color.2].as_ref());
     }
 
-    fn get_tile(&self, bank: usize, tile_index: usize, pattern_table: &[u8]) -> TileData {
+    fn get_tile(&self, bank: usize, tile_index: usize) -> TileData {
         let range = {
             let start = bank + (tile_index * TILE_LEN);
             start..start + TILE_LEN
         };
-        pattern_table[range].try_into().unwrap()
+        self.pattern_table.as_ref().unwrap()[range].try_into().unwrap()
     }
 
     fn for_pixel_in_tile<T>(&mut self, tile: &TileData, palette_entry: PaletteEntry, draw_fn: T)
@@ -88,7 +90,6 @@ impl Renderer {
         &mut self,
         bank: usize,
         nametable: &[u8],
-        pattern_table: &[u8],
         viewport: Rectangle,
         shift_x: isize,
         shift_y: isize,
@@ -105,7 +106,7 @@ impl Renderer {
         for (i, tile_index) in nametable.iter().enumerate().take(NAMETABLE_END) {
             let tile_x = i % TILES_WIDTH;
             let tile_y = i / TILES_WIDTH;
-            let tile = self.get_tile(bank, *tile_index as usize, pattern_table);
+            let tile = self.get_tile(bank, *tile_index as usize);
 
             let palette = {
                 // The attribute table is an 8x8 byte array containing palette table indices.
@@ -128,11 +129,7 @@ impl Renderer {
                 x += tile_x * 8;
                 y += tile_y * 8;
 
-                if x >= viewport.top_left.x
-                    && x < viewport.bottom_right.x
-                    && y >= viewport.top_left.y
-                    && y < viewport.bottom_right.y
-                {
+                if viewport.contains(&Point::new(x, y)) {
                     renderer.set_pixel(
                         (x as isize + shift_x) as usize,
                         (y as isize + shift_y) as usize,
@@ -151,7 +148,6 @@ impl Renderer {
         nametable_addr: usize,
         mirroring: &Mirroring,
         vram: &VideoRam,
-        pattern_table: &[u8],
     ) {
         let scroll_x = scroll_x as usize;
         let scroll_y = scroll_y as usize;
@@ -193,7 +189,6 @@ impl Renderer {
         self.draw_nametable(
             bank,
             first_nametable,
-            pattern_table,
             Rectangle::new(Point::new(scroll_x, scroll_y), Point::new(WIDTH, HEIGHT)),
             -(scroll_x as isize),
             -(scroll_y as isize),
@@ -202,21 +197,20 @@ impl Renderer {
         self.draw_nametable(
             bank,
             second_nametable,
-            pattern_table,
             Rectangle::new(Point::new(0, 0), Point::new(scroll_x, HEIGHT)),
             (WIDTH - scroll_x) as isize,
             0,
         );
     }
 
-    pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory, pattern_table: &[u8]) {
+    pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
         for object in oam.iter() {
             // TODO: Apply sprite priority properly
             // if object.behind_background {
             //     continue;
             // }
 
-            let tile = self.get_tile(bank, object.tile_index, pattern_table);
+            let tile = self.get_tile(bank, object.tile_index);
             let palette = self.palette.sprite_entry(object.palette_index);
 
             self.for_pixel_in_tile(&tile, palette, |renderer, x, y, color| {
@@ -270,7 +264,7 @@ struct Point {
 }
 
 impl Point {
-    fn new(x: usize, y: usize) -> Self {
+    const fn new(x: usize, y: usize) -> Self {
         Self { x, y }
     }
 }
@@ -281,10 +275,17 @@ struct Rectangle {
 }
 
 impl Rectangle {
-    fn new(top_left: Point, bottom_right: Point) -> Self {
+    const fn new(top_left: Point, bottom_right: Point) -> Self {
         Self {
             top_left,
             bottom_right,
         }
+    }
+
+    const fn contains(&self, point: &Point) -> bool {
+        point.x >= self.top_left.x
+            && point.x < self.bottom_right.x
+            && point.y >= self.top_left.y
+            && point.y < self.bottom_right.y
     }
 }

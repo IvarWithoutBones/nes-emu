@@ -77,7 +77,7 @@ impl AdressingMode {
 
             Self::Indirect => {
                 let ptr = cpu.read_word(after_opcode);
-                let low = cpu.read_byte(ptr as u16);
+                let low = cpu.read_byte(ptr);
 
                 // Accomodate for a hardware bug, the 6502 reference states the following:
                 //    "An original 6502 has does not correctly fetch the target address if the indirect vector
