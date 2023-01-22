@@ -32,12 +32,10 @@ impl ObjectAttributeMemory {
         result
     }
 
-    #[tracing::instrument(skip(self, addr, fetch_buf), parent = &self.span)]
-    pub fn write_dma<F>(&mut self, addr: u8, fetch_buf: F)
-    where
-        F: FnOnce(Range<usize>) -> [u8; Self::MEMORY_SIZE],
-    {
+    #[tracing::instrument(skip(self, addr), parent = &self.span)]
+    pub fn dma(&self, addr: u8) -> Range<usize> {
         // Convert to a page index: $XX -> $XX00
+        tracing::debug!("DMA write of ${:02X}", addr);
         let begin = ((addr as u16) << 8) as usize;
         let end = begin + Self::MEMORY_SIZE;
         tracing::debug!(
@@ -46,10 +44,7 @@ impl ObjectAttributeMemory {
             end,
             self.address
         );
-
-        for byte in fetch_buf(begin..end) {
-            self.write_data(byte);
-        }
+        begin..end
     }
 
     pub fn iter(&self) -> OamIterator<'_> {

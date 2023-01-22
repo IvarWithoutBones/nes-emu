@@ -165,9 +165,11 @@ impl Memory for Bus {
 
                 // TODO: this isn't the prettiest, but we need special behavior from the bus for DMA
                 if register == &ppu::registers::Register::ObjectAttributeDirectMemoryAccess {
-                    self.ppu
-                        .oam
-                        .write_dma(data, |range| self.cpu_ram[range].try_into().unwrap());
+                    let range = self.ppu.oam.dma(data);
+                    for i in range {
+                        let byte = self.read_byte(i.try_into().unwrap());
+                        self.ppu.oam.write_data(byte);
+                    }
                 } else {
                     self.ppu.write_register(register, data);
                 }
