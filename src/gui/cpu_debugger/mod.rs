@@ -1,10 +1,7 @@
 pub mod step_state;
 
 use super::{default_frame, header_label};
-use crate::{
-    bus::CPU_RAM_SIZE,
-    cpu::{flags::CpuFlags, CpuState},
-};
+use crate::cpu::{flags::CpuFlags, CpuState, CpuRam};
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;
 use std::{
@@ -49,7 +46,7 @@ impl CpuDebugger {
         let highlight_text_colour = mem_viewer_options.highlight_text_colour;
         let memory_viewer = MemoryEditor::new()
             .with_options(mem_viewer_options)
-            .with_address_range("CPU RAM", 0..CPU_RAM_SIZE);
+            .with_address_range("CPU RAM", 0..CpuRam::SIZE);
 
         Self {
             span: Self::span(),
@@ -282,13 +279,13 @@ impl CpuDebugger {
         viewer: &mut egui_memory_editor::MemoryEditor,
     ) {
         header_label(ui, "Memory Viewer");
-        let mut mem = state.memory;
+        let mut mem = &state.memory;
         viewer.draw_editor_contents_read_only(ui, &mut mem, |mem, addr| {
             if addr >= mem.len() {
                 tracing::warn!("memory viewer address out of bounds: {}", addr);
                 return None;
             }
-            Some(mem[addr])
+            Some(mem[addr.try_into().unwrap()])
         });
     }
 }

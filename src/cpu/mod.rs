@@ -3,13 +3,65 @@ mod assembler;
 pub mod flags;
 mod instructions;
 
-use crate::bus::{Bus, Clock, CycleCount, Memory, CPU_RAM_SIZE, PROGRAM_ROM_RANGE};
-use crate::gui::cpu_debugger::StepState;
-use crate::util;
+use crate::{
+    bus::{Bus, Clock, CycleCount, Device, Memory},
+    gui::cpu_debugger::StepState,
+    util,
+};
 use flags::CpuFlags;
 use instructions::Instruction;
-use std::fmt;
-use std::sync::mpsc::{Receiver, Sender};
+use std::{
+    fmt,
+    ops::{Index, IndexMut},
+    sync::mpsc::{Receiver, Sender},
+};
+
+/// Writable memory for the CPU
+#[derive(Clone)]
+pub struct CpuRam {
+    pub data: [u8; Self::SIZE],
+}
+
+impl CpuRam {
+    pub const SIZE: usize = 0x800;
+
+    const fn mirror(address: u16) -> usize {
+        // Addressing is 11 bits, so we need to mask the top 5 off
+        (address & 0b0000_0111_1111_1111) as usize
+    }
+
+    pub const fn len(&self) -> usize {
+        Self::SIZE
+    }
+}
+
+impl Device for CpuRam {
+    fn contains(&self, address: u16) -> bool {
+        (0..=0x1FFF).contains(&address)
+    }
+}
+
+impl Default for CpuRam {
+    fn default() -> Self {
+        Self {
+            data: [0; Self::SIZE],
+        }
+    }
+}
+
+impl Index<u16> for CpuRam {
+    type Output = u8;
+
+    fn index(&self, index: u16) -> &Self::Output {
+        &self.data[Self::mirror(index)]
+    }
+}
+
+impl IndexMut<u16> for CpuRam {
+    fn index_mut(&mut self, index: u16) -> &mut Self::Output {
+        &mut self.data[Self::mirror(index)]
+    }
+}
 
 /// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
 pub struct CpuState {
@@ -20,7 +72,7 @@ pub struct CpuState {
     pub program_counter: u16,
     pub stack_pointer: u8,
     pub status: CpuFlags,
-    pub memory: [u8; CPU_RAM_SIZE],
+    pub memory: CpuRam,
 }
 
 /// See https://www.nesdev.org/wiki/CPU
@@ -47,9 +99,9 @@ impl Cpu {
     pub fn new(bus: Bus) -> Cpu {
         Cpu {
             span: tracing::span!(tracing::Level::INFO, "cpu"),
-            program_counter: *PROGRAM_ROM_RANGE.start(),
             stack_pointer: Cpu::STACK_RESET,
             flags: CpuFlags::default(),
+            program_counter: 0,
             accumulator: 0,
             register_x: 0,
             register_y: 0,
@@ -140,7 +192,7 @@ impl Cpu {
             program_counter: self.program_counter,
             stack_pointer: self.stack_pointer,
             status: self.flags.clone(),
-            memory: self.bus.cpu_ram,
+            memory: self.bus.cpu_ram.clone(),
         };
 
         tracing::debug!("{}  {}", self, state.instruction);
@@ -308,7 +360,7 @@ mod test {
         assert_eq!(cpu.accumulator, 0);
         assert_eq!(cpu.register_x, 0);
         assert_eq!(cpu.register_y, 0);
-        assert_eq!(cpu.program_counter, *PROGRAM_ROM_RANGE.start());
+        assert_eq!(cpu.program_counter, 0);
         assert_eq!(cpu.flags, CpuFlags::default());
     });
 

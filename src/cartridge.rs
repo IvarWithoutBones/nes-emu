@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use std::{fmt, path::PathBuf};
+use crate::bus::{Device, Memory};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Mirroring {
@@ -179,5 +180,27 @@ impl From<PathBuf> for Cartridge {
             );
             std::process::exit(1);
         })
+    }
+}
+
+const PROGRAM_ROM_START: u16 = 0x8000;
+
+impl Device for Cartridge {
+    fn contains(&self, address: u16) -> bool {
+        (PROGRAM_ROM_START..=0xFFFF).contains(&address)
+    }
+}
+
+impl Memory for Cartridge {
+    fn read_byte(&mut self, mut address: u16) -> u8 {
+        address -= PROGRAM_ROM_START;
+        if self.header.program_rom_pages == 1 {
+            address %= Self::PROGRAM_ROM_PAGE_SIZE as u16;
+        }
+        self.program_rom[address as usize]
+    }
+
+    fn write_byte(&mut self, _address: u16, _value: u8) {
+        unreachable!("cartridge is read-only");
     }
 }

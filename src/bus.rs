@@ -1,16 +1,13 @@
-use crate::cartridge::Cartridge;
-use crate::controller;
-use crate::ppu::renderer::PixelBuffer;
-use crate::ppu::{self, *};
-use std::ops::RangeInclusive;
-use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
-
-pub const CPU_RAM_SIZE: usize = 2048;
-const CPU_RAM_RANGE: RangeInclusive<u16> = 0..=0x1FFF;
-pub const PROGRAM_ROM_RANGE: RangeInclusive<u16> = 0x8000..=0xFFFF;
-// TODO: Second controller
-const CONTROLLER_RANGE: RangeInclusive<u16> = 0x4016..=0x4016;
+use crate::{
+    cartridge::Cartridge,
+    controller,
+    cpu::CpuRam,
+    ppu::{self, renderer::PixelBuffer, Ppu},
+};
+use std::{
+    path::PathBuf,
+    sync::mpsc::{channel, Receiver, Sender},
+};
 
 pub type CycleCount = usize;
 
@@ -47,10 +44,14 @@ pub trait Memory {
     }
 }
 
+pub trait Device {
+    fn contains(&self, address: u16) -> bool;
+}
+
 pub struct Bus {
     span: tracing::Span,
     pub cartridge: Option<Cartridge>,
-    pub cpu_ram: [u8; CPU_RAM_SIZE],
+    pub cpu_ram: CpuRam,
     pub cycles: CycleCount,
     pub ppu: Ppu,
     pub controller: controller::Controller,
@@ -70,7 +71,7 @@ impl Bus {
             rom_receiver,
             cartridge: None,
             ppu: Ppu::new(pixel_sender),
-            cpu_ram: [0; CPU_RAM_SIZE],
+            cpu_ram: CpuRam::default(),
             cycles: 0,
             controller: controller::Controller::new(button_receiver),
         }
@@ -89,11 +90,6 @@ impl Bus {
         self.cartridge.is_some()
     }
 
-    const fn to_cpu_ram_address(address: u16) -> u16 {
-        // Addressing is 11 bits, so we need to mask the top 5 off
-        address & 0b0000_0111_1111_1111
-    }
-
     /// Generate a dummy bus, used for tests
     #[allow(dead_code)]
     pub fn new_dummy(data: Vec<u8>) -> Self {
@@ -109,23 +105,17 @@ impl Bus {
 
 impl Memory for Bus {
     #[tracing::instrument(skip(self, address), parent = &self.span)]
-    fn read_byte(&mut self, mut address: u16) -> u8 {
-        if CONTROLLER_RANGE.contains(&address) {
+    fn read_byte(&mut self, address: u16) -> u8 {
+        if self.controller.contains(address) {
             self.controller.read()
-        } else if PROGRAM_ROM_RANGE.contains(&address) {
-            address -= PROGRAM_ROM_RANGE.start();
-            let cart = self.cartridge.as_ref().unwrap();
-            if cart.header.program_rom_pages == 1 {
-                address %= 0x4000;
-            }
-            let result = cart.program_rom[address as usize];
-            tracing::trace!("program ROM read at ${:04X}: ${:02X}", address, result);
-            result
-        } else if CPU_RAM_RANGE.contains(&address) {
-            address = Self::to_cpu_ram_address(address);
-            let result = self.cpu_ram[address as usize];
-            tracing::trace!("CPU RAM read at ${:04X}: ${:02X}", address, result);
-            result
+        } else if self.cpu_ram.contains(address) {
+            self.cpu_ram[address]
+        } else if self
+            .cartridge
+            .as_ref()
+            .map_or(false, |c| c.contains(address))
+        {
+            self.cartridge.as_mut().unwrap().read_byte(address)
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.readable() {
                 tracing::trace!("PPU register {} read at ${:04X}", register, address);
@@ -147,13 +137,11 @@ impl Memory for Bus {
     }
 
     #[tracing::instrument(skip(self, address, data), parent = &self.span)]
-    fn write_byte(&mut self, mut address: u16, data: u8) {
-        if CONTROLLER_RANGE.contains(&address) {
+    fn write_byte(&mut self, address: u16, data: u8) {
+        if self.controller.contains(address) {
             self.controller.write(data);
-        } else if CPU_RAM_RANGE.contains(&address) {
-            address = Self::to_cpu_ram_address(address);
-            tracing::trace!("writing to CPU RAM at ${:04X}: ${:02X}", address, data);
-            self.cpu_ram[address as usize] = data;
+        } else if self.cpu_ram.contains(address) {
+            self.cpu_ram[address] = data;
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.writable() {
                 tracing::trace!(
@@ -181,7 +169,11 @@ impl Memory for Bus {
                 );
                 panic!()
             }
-        } else if PROGRAM_ROM_RANGE.contains(&address) {
+        } else if self
+            .cartridge
+            .as_ref()
+            .map_or(false, |c| c.contains(address))
+        {
             tracing::error!(
                 "writing read-only program ROM at ${:04X}: ${:02X}",
                 address,

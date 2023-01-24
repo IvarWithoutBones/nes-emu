@@ -1,4 +1,4 @@
-use crate::util;
+use crate::{bus::Device, util};
 use bitflags::bitflags;
 use std::sync::mpsc::Receiver;
 
@@ -13,6 +13,22 @@ bitflags! {
         const Down   = 0b0010_0000;
         const Left   = 0b0100_0000;
         const Right  = 0b1000_0000;
+    }
+}
+
+impl Buttons {
+    pub fn format_index(val: u8) -> &'static str {
+        match val {
+            0 => "A",
+            1 => "B",
+            2 => "Select",
+            3 => "Start",
+            4 => "Up",
+            5 => "Down",
+            6 => "Left",
+            7 => "Right",
+            _ => "Unknown",
+        }
     }
 }
 
@@ -66,18 +82,9 @@ impl Controller {
     }
 }
 
-impl Buttons {
-    pub fn format_index(val: u8) -> &'static str {
-        match val {
-            0 => "A",
-            1 => "B",
-            2 => "Select",
-            3 => "Start",
-            4 => "Up",
-            5 => "Down",
-            6 => "Left",
-            7 => "Right",
-            _ => "Unknown",
-        }
+impl Device for Controller {
+    fn contains(&self, address: u16) -> bool {
+        // TODO: Second controller
+        address == 0x4016
     }
 }
