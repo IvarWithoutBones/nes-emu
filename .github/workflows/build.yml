@@ -1,0 +1,23 @@
+name: "build"
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v3.3.0
+
+      - name: install Nix
+        uses: cachix/install-nix-action@v18
+        with: 
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+
+      - name: check flake
+        run: nix flake check --print-build-logs
+
+      - name: build flake
+        run: nix build --print-build-logs
