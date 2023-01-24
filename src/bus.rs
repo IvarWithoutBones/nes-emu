@@ -7,6 +7,7 @@ use crate::{
 use std::{
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
+    time,
 };
 
 pub type CycleCount = usize;
@@ -14,12 +15,10 @@ pub type CycleCount = usize;
 pub trait Clock {
     const MULTIPLIER: usize = 1;
 
-    fn tick_internal(&mut self, cycles: CycleCount);
-    fn get_cycles(&self) -> CycleCount;
-    fn set_cycles(&mut self, cycles: CycleCount);
+    fn tick_impl(&mut self, cycles: CycleCount);
 
     fn tick(&mut self, cycles: CycleCount) {
-        self.tick_internal(cycles * Self::MULTIPLIER);
+        self.tick_impl(cycles * Self::MULTIPLIER);
     }
 
     fn tick_once_if(&mut self, condition: bool) {
@@ -39,7 +38,7 @@ pub trait Memory {
 
     fn write_word(&mut self, address: u16, data: u16) {
         for (i, val) in u16::to_le_bytes(data).iter().enumerate() {
-            self.write_byte((address as usize + i).try_into().unwrap(), *val);
+            self.write_byte(address + i as u16, *val);
         }
     }
 }
@@ -56,6 +55,7 @@ pub struct Bus {
     pub ppu: Ppu,
     pub controller: controller::Controller,
     rom_receiver: Receiver<PathBuf>,
+    time_since_last_frame: time::Instant,
 }
 
 impl Bus {
@@ -74,6 +74,7 @@ impl Bus {
             cpu_ram: CpuRam::default(),
             cycles: 0,
             controller: controller::Controller::new(button_receiver),
+            time_since_last_frame: time::Instant::now(),
         }
     }
 
@@ -188,7 +189,7 @@ impl Memory for Bus {
 }
 
 impl Clock for Bus {
-    fn tick_internal(&mut self, cycles: CycleCount) {
+    fn tick_impl(&mut self, cycles: CycleCount) {
         self.controller.update();
         self.cycles += cycles;
 
@@ -199,19 +200,13 @@ impl Clock for Bus {
         if !vblank_before && vblank_after {
             self.ppu.render();
 
-            // This is a hack to ensure we dont send too many frames to the renderer at once, locking up the GUI.
-            // TODO: Should be removed when proper timing is implemented.
-            if cfg!(not(debug_assertions)) && cfg!(not(target_arch = "wasm32")) {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+            // TODO: how accurate is this?
+            if self.time_since_last_frame.elapsed() < time::Duration::from_millis(16) {
+                std::thread::sleep(
+                    time::Duration::from_millis(16) - self.time_since_last_frame.elapsed(),
+                );
             }
+            self.time_since_last_frame = time::Instant::now();
         }
-    }
-
-    fn get_cycles(&self) -> CycleCount {
-        self.cycles
-    }
-
-    fn set_cycles(&mut self, cycles: CycleCount) {
-        self.cycles = cycles;
     }
 }

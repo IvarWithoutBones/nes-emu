@@ -248,7 +248,7 @@ impl Clock for Ppu {
     const MULTIPLIER: usize = 3;
 
     #[tracing::instrument(skip(self, cycles), parent = &self.span)]
-    fn tick_internal(&mut self, cycles: CycleCount) {
+    fn tick_impl(&mut self, cycles: CycleCount) {
         const CYCLES_PER_SCANLINE: CycleCount = 341;
         const SCANLINES_PER_FRAME: ScanlineCount = 261;
         const VBLANK_SCANLINE: ScanlineCount = 241;
@@ -259,7 +259,7 @@ impl Clock for Ppu {
                 self.status.set_sprite_zero(true);
             }
 
-            self.set_cycles(self.cycles - CYCLES_PER_SCANLINE);
+            self.cycles -= CYCLES_PER_SCANLINE;
             self.scanline += 1;
 
             if self.scanline == VBLANK_SCANLINE {
@@ -280,13 +280,5 @@ impl Clock for Ppu {
                 tracing::debug!("finished computing frame");
             }
         }
-    }
-
-    fn get_cycles(&self) -> CycleCount {
-        self.cycles
-    }
-
-    fn set_cycles(&mut self, cycles: CycleCount) {
-        self.cycles = cycles;
     }
 }

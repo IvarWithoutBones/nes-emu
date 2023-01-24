@@ -63,7 +63,7 @@ impl Controller {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn read(&mut self) -> u8 {
-        tracing::info!(
+        tracing::debug!(
             "reading controller button {}",
             Buttons::format_index(self.index)
         );

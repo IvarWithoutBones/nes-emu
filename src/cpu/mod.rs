@@ -98,7 +98,7 @@ impl Cpu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn reset(&mut self) {
-        self.set_cycles(Cpu::RESET_CYCLES);
+        self.bus.cycles = Cpu::RESET_CYCLES;
         self.flags = CpuFlags::default();
         self.stack_pointer = Cpu::STACK_RESET;
         self.accumulator = 0;
@@ -211,16 +211,8 @@ impl Memory for Cpu {
 }
 
 impl Clock for Cpu {
-    fn tick_internal(&mut self, cycles: CycleCount) {
-        self.bus.tick_internal(cycles);
-    }
-
-    fn get_cycles(&self) -> CycleCount {
-        self.bus.get_cycles()
-    }
-
-    fn set_cycles(&mut self, cycles: CycleCount) {
-        self.bus.set_cycles(cycles);
+    fn tick_impl(&mut self, cycles: CycleCount) {
+        self.bus.tick(cycles);
     }
 }
 
@@ -235,7 +227,7 @@ impl fmt::Display for Cpu {
             self.register_y,
             self.flags,
             self.stack_pointer,
-            self.get_cycles(),
+            self.bus.cycles,
             self.flags
         )
     }
