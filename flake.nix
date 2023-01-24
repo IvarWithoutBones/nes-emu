@@ -113,7 +113,7 @@
         default = nes-emu;
       };
 
-      devShell = pkgs.mkShell {
+      devShells.default = pkgs.mkShell {
         inputsFrom = [ nes-emu ];
 
         packages = [
@@ -125,7 +125,7 @@
           (lib.makeLibraryPath nes-emu.buildInputs);
 
         # Avoid not being able to find gsettings schemas when opening the file picker
-        shellHook = ''
+        shellHook = lib.optionalString hostPlatform.isLinux ''
           export XDG_DATA_DIRS="$XDG_DATA_DIRS:$GSETTINGS_SCHEMAS_PATH"
         '';
       };
