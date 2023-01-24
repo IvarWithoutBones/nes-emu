@@ -9,7 +9,14 @@ mod util;
 use bus::Bus;
 use clap::Parser;
 use gui::Gui;
-use std::sync::mpsc::channel;
+use std::{str::FromStr, sync::mpsc::channel};
+use tracing_subscriber::{
+    filter::{self, LevelFilter},
+    fmt,
+    prelude::*,
+    reload::{self, Handle},
+    Registry,
+};
 
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
@@ -27,25 +34,31 @@ struct Args {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn tracing_init(log_level: Option<String>) {
-    let log_level = log_level.unwrap_or_else(|| "debug".to_string());
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(log_level)
-        .with_target(false) // Dont display 'nes_emu' for every span
-        .without_time()
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set default subscriber");
+fn tracing_init(log_level: Option<String>) -> Handle<LevelFilter, Registry> {
+    let log_level = log_level.unwrap_or_else(|| "info".to_string());
+    let filter = filter::LevelFilter::from_str(&log_level).unwrap();
+    let (filter, reload_handle) = reload::Layer::new(filter);
+    tracing_subscriber::registry()
+        .with(filter)
+        // Do not display 'nes-emu' and the time in every log message
+        .with(fmt::layer().without_time().with_target(false))
+        .init();
+    reload_handle
 }
 
 #[cfg(target_arch = "wasm32")]
-fn tracing_init(_log_level: Option<String>) {
+fn tracing_init(_log_level: Option<String>) -> Handle<LevelFilter, Registry> {
+    // TODO: The reload handle is a no-op on wasm, so we can't change the log level
+    let filter = filter::LevelFilter::from_str("info").unwrap();
+    let (filter, reload_handle) = reload::Layer::new(filter);
     console_error_panic_hook::set_once();
     tracing_wasm::set_as_global_default();
+    reload_handle
 }
 
 fn main() {
     let args = Args::parse();
-    tracing_init(args.log_level);
+    let log_reload_handle = tracing_init(args.log_level);
 
     // CPU state communication
     let (rom_sender, rom_receiver) = channel();
@@ -84,12 +97,12 @@ fn main() {
     if !args.without_gui {
         Gui::run(
             "NES emu",
+            log_reload_handle,
             state_receiver.unwrap(),
             step_sender.unwrap(),
             rom_sender,
             button_sender,
             pixel_receiver,
-
             #[cfg(target_arch = "wasm32")]
             bus,
         );

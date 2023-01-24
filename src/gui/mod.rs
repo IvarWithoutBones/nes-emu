@@ -15,6 +15,7 @@ use std::{
     path::PathBuf,
     sync::mpsc::{Receiver, Sender},
 };
+use tracing_subscriber::{filter::LevelFilter, reload::Handle, Registry};
 
 #[cfg(target_arch = "wasm32")]
 use crate::cpu::{self, Cpu};
@@ -33,6 +34,9 @@ pub struct Gui {
     input: Input,
     rom_sender: Sender<PathBuf>,
 
+    log_reload_handle: Handle<LevelFilter, Registry>,
+    log_level: LevelFilter,
+
     // Multithreading is not supported in wasm32, so we have to run the CPU from this thread
     #[cfg(target_arch = "wasm32")]
     cpu: Cpu,
@@ -41,6 +45,7 @@ pub struct Gui {
 impl Gui {
     fn new(
         span: tracing::Span,
+        log_reload_handle: Handle<LevelFilter, Registry>,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
@@ -49,6 +54,9 @@ impl Gui {
 
         #[cfg(target_arch = "wasm32")] bus: crate::bus::Bus,
     ) -> Self {
+        let log_level = log_reload_handle
+            .clone_current()
+            .unwrap_or(LevelFilter::INFO);
         Self {
             span,
             rom_sender,
@@ -56,6 +64,9 @@ impl Gui {
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
             input: Input::new(button_sender),
+
+            log_reload_handle,
+            log_level,
 
             #[cfg(target_arch = "wasm32")]
             cpu: cpu::Cpu::new(bus),
@@ -65,6 +76,7 @@ impl Gui {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn run(
         window_title: &str,
+        log_reload_handle: Handle<LevelFilter, Registry>,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
         rom_sender: Sender<PathBuf>,
@@ -79,6 +91,7 @@ impl Gui {
             Box::new(|_cc| {
                 Box::new(Self::new(
                     span,
+                    log_reload_handle,
                     cpu_state_receiver,
                     step_sender,
                     button_sender,
@@ -92,6 +105,7 @@ impl Gui {
     #[cfg(target_arch = "wasm32")]
     pub fn run(
         _window_title: &str,
+        log_reload_handle: Handle<LevelFilter, Registry>,
         cpu_state_receiver: Receiver<Box<CpuState>>,
         step_sender: Sender<StepState>,
         rom_sender: Sender<PathBuf>,
@@ -108,6 +122,7 @@ impl Gui {
                 Box::new(|_cc| {
                     Box::new(Self::new(
                         span,
+                        log_reload_handle,
                         cpu_state_receiver,
                         step_sender,
                         button_sender,
@@ -157,6 +172,7 @@ impl Gui {
             ui.menu_button("File", |ui| {
                 let open_file = ui.button("Open").on_hover_text("Open a ROM file");
                 if open_file.clicked() {
+                    ui.close_menu();
                     // TODO: use the async file dialog for WASI targets
                     #[cfg(not(target_arch = "wasm32"))]
                     if let Some(file) = rfd::FileDialog::new()
@@ -178,15 +194,39 @@ impl Gui {
                 let screen = ui.radio_value(&mut self.current_view, View::Screen, "Screen");
                 if screen.clicked() {
                     tracing::info!("switching view to screen");
+                    ui.close_menu();
                 }
 
                 let cpu_debugger =
                     ui.radio_value(&mut self.current_view, View::CpuDebugger, "CPU Debugger");
                 if cpu_debugger.clicked() {
                     tracing::info!("switching view to CPU debugger");
+                    ui.close_menu();
                 }
+            });
+
+            ui.menu_button("Log", |ui| {
+                self.log_level_button(ui, LevelFilter::OFF);
+                self.log_level_button(ui, LevelFilter::ERROR);
+                self.log_level_button(ui, LevelFilter::WARN);
+                self.log_level_button(ui, LevelFilter::INFO);
+                self.log_level_button(ui, LevelFilter::DEBUG);
+                self.log_level_button(ui, LevelFilter::TRACE);
             })
         });
+    }
+
+    fn log_level_button(&mut self, ui: &mut egui::Ui, level: LevelFilter) {
+        let button = ui.radio_value(&mut self.log_level, level, level.to_string());
+        if button.clicked() {
+            tracing::info!("switching log level to {}", level);
+            self.log_reload_handle
+                .modify(|filter| *filter = level)
+                .unwrap_or_else(|err| {
+                    tracing::error!("failed to modify log level: {}", err);
+                });
+            ui.close_menu();
+        }
     }
 }
 
