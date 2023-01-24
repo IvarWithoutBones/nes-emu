@@ -5,7 +5,6 @@ mod instructions;
 
 use crate::{
     bus::{Bus, Clock, CycleCount, Device, Memory},
-    gui::cpu_debugger::StepState,
     util,
 };
 use flags::CpuFlags;
@@ -61,18 +60,6 @@ impl IndexMut<u16> for CpuRam {
     fn index_mut(&mut self, index: u16) -> &mut Self::Output {
         &mut self.data[Self::mirror(index)]
     }
-}
-
-/// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
-pub struct CpuState {
-    pub instruction: String,
-    pub accumulator: u8,
-    pub register_x: u8,
-    pub register_y: u8,
-    pub program_counter: u16,
-    pub stack_pointer: u8,
-    pub status: CpuFlags,
-    pub memory: CpuRam,
 }
 
 /// See https://www.nesdev.org/wiki/CPU
@@ -302,6 +289,45 @@ pub fn spawn_thread(
             }
         }
     })
+}
+
+/// State of execution. This is used to step per-instruction and to pause the CPU.
+#[derive(Clone)]
+pub struct StepState {
+    pub paused: bool,
+    pub step: bool,
+}
+
+impl Default for StepState {
+    fn default() -> Self {
+        Self {
+            paused: false,
+            step: true,
+        }
+    }
+}
+
+impl StepState {
+    pub fn step(&mut self) {
+        self.step = true;
+        self.paused = true;
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.paused = !self.paused;
+    }
+}
+
+/// Passed to the GUI for the debugger. Could maybe be used for savestates in the future?
+pub struct CpuState {
+    pub instruction: String,
+    pub accumulator: u8,
+    pub register_x: u8,
+    pub register_y: u8,
+    pub program_counter: u16,
+    pub stack_pointer: u8,
+    pub status: CpuFlags,
+    pub memory: CpuRam,
 }
 
 #[cfg(test)]

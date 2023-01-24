@@ -1,14 +1,11 @@
-pub mod step_state;
-
 use super::{default_frame, header_label};
-use crate::cpu::{flags::CpuFlags, CpuState, CpuRam};
+use crate::cpu::{flags::CpuFlags, CpuState, CpuRam, StepState};
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;
 use std::{
     cell::RefCell,
     sync::mpsc::{Receiver, Sender},
 };
-pub use step_state::StepState;
 
 pub struct CpuDebugger {
     span: tracing::Span,

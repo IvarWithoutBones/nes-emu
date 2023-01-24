@@ -3,8 +3,12 @@ mod input;
 mod screen;
 
 use self::input::Input;
-use crate::{controller, cpu::CpuState, ppu::renderer::PixelBuffer};
-use cpu_debugger::{step_state::StepState, CpuDebugger};
+use crate::{
+    controller,
+    cpu::{CpuState, StepState},
+    ppu::renderer::PixelBuffer,
+};
+use cpu_debugger::CpuDebugger;
 use eframe::egui;
 use screen::Screen;
 use std::{
