@@ -2,7 +2,23 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "flake-utils";
+      };
+    };
+
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "flake-utils";
+        rust-overlay.follows = "rust-overlay";
+      };
+    };
   };
 
   outputs =
@@ -10,22 +26,26 @@
     , nixpkgs
     , flake-utils
     , rust-overlay
+    , crane
     }:
     flake-utils.lib.eachDefaultSystem (system:
     let
-      overlays = [ (import rust-overlay) ];
-      pkgs = import nixpkgs { inherit system overlays; };
-      hostPlatform = pkgs.stdenvNoCC.hostPlatform;
-      lib = pkgs.lib;
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ (import rust-overlay) ];
+      };
 
       # Enable WASI cross compiling support
-      rust = pkgs.rust-bin.stable.latest.default.override {
+      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
         targets = [ "wasm32-unknown-unknown" hostPlatform.config ];
       };
 
+      craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+      hostPlatform = pkgs.stdenvNoCC.hostPlatform;
+      lib = pkgs.lib;
+
       nes-emu = pkgs.callPackage
         ({ lib
-         , rustPlatform
            # Linux
          , cmake
          , pkg-config
@@ -49,7 +69,7 @@
          , pango
          , gdk-pixbuf
          }:
-          rustPlatform.buildRustPackage {
+          craneLib.buildPackage {
             pname = "nes-emu";
             version =
               let
@@ -59,19 +79,9 @@
               in
               "0.pre+date=${year}-${month}-${day}";
 
-            src = lib.cleanSourceWith {
-              src = lib.cleanSource ./.;
-              filter = name: type:
-                !(baseNameOf name == "target" && type == "directory") &&
-                !(baseNameOf name == "flake.nix" && type == "file") &&
-                !(baseNameOf name == "flake.lock" && type == "file");
-            };
+            src = craneLib.cleanCargoSource ./.;
 
-            cargoLock.lockFile = ./Cargo.lock;
-
-            nativeBuildInputs = [
-              rust
-            ] ++ lib.optionals hostPlatform.isLinux [
+            nativeBuildInputs = lib.optionals hostPlatform.isLinux [
               cmake
               pkg-config
               wrapGAppsHook
@@ -108,9 +118,10 @@
         { inherit (pkgs.darwin.apple_sdk.frameworks) AppKit OpenGL; };
     in
     {
-      packages = {
+      packages.default = nes-emu;
+
+      checks = {
         inherit nes-emu;
-        default = nes-emu;
       };
 
       devShells.default = pkgs.mkShell {
@@ -118,7 +129,7 @@
 
         packages = [
           pkgs.trunk
-          rust
+          rustToolchain
         ];
 
         LD_LIBRARY_PATH = lib.optional hostPlatform.isLinux
