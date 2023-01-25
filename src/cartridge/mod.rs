@@ -4,6 +4,7 @@ use bitflags::bitflags;
 pub use mapper::MapperInstance;
 use std::{fmt, path::PathBuf};
 
+// TODO: Nicer page abstraction
 pub const PROGRAM_ROM_START: u16 = 0x8000;
 pub const PROGRAM_ROM_PAGE_SIZE: usize = 16 * 1024;
 pub const CHARACTER_ROM_PAGE_SIZE: usize = 8 * 1024;
@@ -139,10 +140,18 @@ impl Cartridge {
         tracing::info!("{} mirroring", header.mirroring);
         tracing::info!("mapper {}\n", header.mapper_id);
 
+        let program_rom = data[program_rom_start..(program_rom_start + program_rom_size)].to_vec();
+        let mut character_rom =
+            data[character_rom_start..(character_rom_start + character_rom_size)].to_vec();
+
+        // Character RAM is used when there is none provided by the cartridge
+        if header.character_rom_pages == 0 {
+            character_rom.resize(CHARACTER_ROM_PAGE_SIZE, 0);
+        }
+
         Ok(Cartridge {
-            program_rom: data[program_rom_start..(program_rom_start + program_rom_size)].to_vec(),
-            character_rom: data[character_rom_start..(character_rom_start + character_rom_size)]
-                .to_vec(),
+            program_rom,
+            character_rom,
             header,
         })
     }

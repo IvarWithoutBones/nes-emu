@@ -1,16 +1,18 @@
 use super::{Cartridge, Mapper, Mirroring, PROGRAM_ROM_PAGE_SIZE, PROGRAM_ROM_START};
 
-pub struct Nrom {
+/// https://www.nesdev.org/wiki/NROM
+#[allow(clippy::upper_case_acronyms)]
+pub struct NROM {
     cartridge: Cartridge,
 }
 
-impl Nrom {
+impl NROM {
     pub fn new(cartridge: Cartridge) -> Self {
         Self { cartridge }
     }
 }
 
-impl Mapper for Nrom {
+impl Mapper for NROM {
     fn mirroring(&self) -> Mirroring {
         self.cartridge.header.mirroring
     }
@@ -28,10 +30,10 @@ impl Mapper for Nrom {
     }
 
     fn write_ppu(&mut self, _address: u16, _value: u8) {
-        unreachable!("cartridge is read-only");
+        unreachable!("cartridge's character rom is read-only");
     }
 
     fn write_cpu(&mut self, _address: u16, _value: u8) {
-        unreachable!("cartridge is read-only");
+        unreachable!("cartridge's program rom is read-only");
     }
 }

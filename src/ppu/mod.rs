@@ -182,12 +182,11 @@ impl Ppu {
             self.renderer.palette[addr.into()] = data;
             tracing::debug!("palette RAM write of ${:02X}", data);
         } else if Self::PATTERN_TABLE_RANGE.contains(&addr) {
-            tracing::error!(
-                "attempting to write to read-only character ROM at ${:04X}: ${:02X}",
-                addr,
-                data
-            );
-            panic!()
+            self.mapper
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .write_ppu(addr, data);
         } else {
             tracing::error!("invalid data write at ${:04X}: ${:02X}", addr, data);
             panic!()

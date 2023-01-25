@@ -178,12 +178,11 @@ impl Memory for Bus {
             .as_ref()
             .map_or(false, |c| c.borrow().contains(address))
         {
-            tracing::error!(
-                "writing read-only program ROM at ${:04X}: ${:02X}",
-                address,
-                data
-            );
-            // panic!()
+            self.mapper
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .write_cpu(address, data);
         } else {
             tracing::error!("unimplemented write at ${:04X}: ${:02X}", address, data);
             // panic!()

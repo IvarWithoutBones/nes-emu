@@ -1,4 +1,5 @@
 mod nrom;
+mod uxrom;
 
 pub use super::{Cartridge, Mirroring, PROGRAM_ROM_PAGE_SIZE, PROGRAM_ROM_START};
 use crate::bus::Device;
@@ -50,7 +51,8 @@ where
 impl From<Cartridge> for Box<dyn Mapper> {
     fn from(cart: Cartridge) -> Self {
         match cart.header.mapper_id {
-            0 => Box::new(nrom::Nrom::new(cart)),
+            0 => Box::new(nrom::NROM::new(cart)),
+            2 => Box::new(uxrom::UxROM::new(cart)),
             _ => panic!("mapper {} not implemented", cart.header.mapper_id),
         }
     }
