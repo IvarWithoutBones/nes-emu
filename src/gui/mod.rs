@@ -2,14 +2,14 @@ pub mod cpu_debugger;
 mod input;
 mod screen;
 
-use self::input::Input;
 use crate::{
     controller,
     cpu::{CpuState, StepState},
-    ppu::renderer::PixelBuffer,
+    ppu::renderer::{PixelBuffer, HEIGHT, WIDTH},
 };
 use cpu_debugger::CpuDebugger;
 use eframe::egui;
+use input::Input;
 use screen::Screen;
 use std::{
     path::PathBuf,
@@ -84,7 +84,14 @@ impl Gui {
         pixel_receiver: Receiver<Box<PixelBuffer>>,
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
-        let options = eframe::NativeOptions::default();
+        const INITIAL_SCALE: f32 = 3.0;
+        let options = eframe::NativeOptions {
+            initial_window_size: Some(egui::Vec2::new(
+                WIDTH as f32 * INITIAL_SCALE,
+                HEIGHT as f32 * INITIAL_SCALE,
+            )),
+            ..Default::default()
+        };
         eframe::run_native(
             window_title,
             options,
