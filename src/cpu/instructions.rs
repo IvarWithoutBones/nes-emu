@@ -562,7 +562,8 @@ mod instruction_impls {
 
     pub fn anc(cpu: &mut Cpu, mode: &AdressingMode) {
         and(cpu, mode);
-        cpu.flags.set(CpuFlags::Carry, cpu.flags.contains(CpuFlags::Negative));
+        cpu.flags
+            .set(CpuFlags::Carry, cpu.flags.contains(CpuFlags::Negative));
     }
 }
 

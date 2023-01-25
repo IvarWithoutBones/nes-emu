@@ -5,6 +5,8 @@ mod instructions;
 
 use crate::{
     bus::{Bus, Clock, CycleCount, Device, Memory},
+    controller,
+    ppu::renderer::PixelBuffer,
     util,
 };
 use flags::CpuFlags;
@@ -12,6 +14,7 @@ use instructions::Instruction;
 use std::{
     fmt,
     ops::{Index, IndexMut},
+    path::PathBuf,
     sync::mpsc::{Receiver, Sender},
 };
 
@@ -236,15 +239,18 @@ impl fmt::Display for Cpu {
 /// Spawn and run the CPU in a separate thread
 #[cfg(not(target_arch = "wasm32"))]
 pub fn spawn_thread(
-    bus: Bus,
+    button_receiver: Receiver<controller::Buttons>,
+    pixel_sender: Sender<Box<PixelBuffer>>,
+    rom_receiver: Receiver<PathBuf>,
     state_sender: Option<Sender<Box<CpuState>>>,
     step_receiver: Option<Receiver<StepState>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut step_state = StepState::default();
+        let bus = Bus::new(button_receiver, pixel_sender, rom_receiver);
         let mut cpu = Cpu::new(bus);
+        let mut step_state = StepState::default();
 
-        while !cpu.bus.has_cartridge() {
+        while !cpu.bus.has_mapper() {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 

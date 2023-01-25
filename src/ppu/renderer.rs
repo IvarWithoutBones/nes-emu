@@ -3,7 +3,10 @@ use super::{
     palette::{Color, Palette, PaletteEntry, PALETTE_TABLE},
     VideoRam,
 };
-use crate::{cartridge::Mirroring, util};
+use crate::{
+    cartridge::{MapperInstance, Mirroring},
+    util,
+};
 use std::sync::mpsc::Sender;
 
 pub const WIDTH: usize = 256;
@@ -20,18 +23,21 @@ pub struct Renderer {
     pixel_sender: Sender<Box<PixelBuffer>>,
     pixels: Box<PixelBuffer>,
     pub palette: Palette,
-    pub pattern_table: Option<Vec<u8>>,
+    pub mapper: Option<MapperInstance>,
 }
 
 impl Renderer {
     pub fn new(pixel_sender: Sender<Box<PixelBuffer>>) -> Self {
         Self {
             pixel_sender,
-            // pattern_table,
             pixels: Box::new([0; PIXEL_BUFFER_LEN]),
             palette: Palette::default(),
-            pattern_table: None,
+            mapper: None,
         }
+    }
+
+    pub fn load_mapper(&mut self, mapper: MapperInstance) {
+        self.mapper = Some(mapper);
     }
 
     pub fn update(&mut self) {
@@ -56,7 +62,13 @@ impl Renderer {
             let start = bank + (tile_index * TILE_LEN);
             start..start + TILE_LEN
         };
-        self.pattern_table.as_ref().unwrap()[range].try_into().unwrap()
+        self.mapper
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .read_ppu_range(range)
+            .try_into()
+            .unwrap()
     }
 
     fn for_pixel_in_tile<T>(&mut self, tile: &TileData, palette_entry: PaletteEntry, draw_fn: T)
@@ -143,16 +155,16 @@ impl Renderer {
     pub fn draw_background(
         &mut self,
         bank: usize,
+        nametable_addr: usize,
+        vram: &VideoRam,
         scroll_x: u8,
         scroll_y: u8,
-        nametable_addr: usize,
-        mirroring: &Mirroring,
-        vram: &VideoRam,
     ) {
         let scroll_x = scroll_x as usize;
         let scroll_y = scroll_y as usize;
 
         // TODO: This is not very pretty
+        let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
         let (first_nametable, second_nametable) = match (&mirroring, nametable_addr) {
             /*
                 Vertical mirroring:

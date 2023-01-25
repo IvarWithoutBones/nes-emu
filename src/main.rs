@@ -6,7 +6,6 @@ mod gui;
 mod ppu;
 mod util;
 
-use bus::Bus;
 use clap::Parser;
 use gui::Gui;
 use std::{str::FromStr, sync::mpsc::channel};
@@ -81,11 +80,16 @@ fn main() {
 
     let (pixel_sender, pixel_receiver) = channel();
     let (button_sender, button_receiver) = channel();
-    let bus: Bus = Bus::new(button_receiver, pixel_sender, rom_receiver);
 
     // Boot up the CPU
     #[cfg(not(target_arch = "wasm32"))]
-    let cpu_handle = cpu::spawn_thread(bus, state_sender, step_receiver);
+    let cpu_handle = cpu::spawn_thread(
+        button_receiver,
+        pixel_sender,
+        rom_receiver,
+        state_sender,
+        step_receiver,
+    );
 
     if let Some(rom) = args.rom {
         rom_sender.send(rom.into()).unwrap_or_else(|err| {

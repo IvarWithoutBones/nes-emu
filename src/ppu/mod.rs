@@ -4,7 +4,7 @@ pub mod registers;
 pub mod renderer;
 
 use super::bus::{Clock, CycleCount};
-use crate::cartridge::{Cartridge, Mirroring};
+use crate::cartridge::{MapperInstance, Mirroring};
 use object_attribute::{Object, ObjectAttributeMemory};
 use registers::Register;
 use renderer::{PixelBuffer, Renderer};
@@ -19,7 +19,7 @@ type ScanlineCount = u16;
 pub struct Ppu {
     span: tracing::Span,
     pub renderer: Renderer,
-    mirroring: Option<Mirroring>,
+    mapper: Option<MapperInstance>,
 
     data_buffer: u8,
     vram: VideoRam,
@@ -45,7 +45,7 @@ impl Ppu {
         Self {
             span: tracing::span!(tracing::Level::INFO, "ppu"),
             renderer: Renderer::new(pixel_sender),
-            mirroring: None,
+            mapper: None,
 
             data_buffer: 0,
             vram: [0; VIDEO_RAM_SIZE],
@@ -63,18 +63,20 @@ impl Ppu {
         }
     }
 
-    pub fn load_cartridge(&mut self, cartridge: &Cartridge) {
-        self.mirroring = Some(cartridge.header.mirroring);
-        self.renderer.pattern_table = Some(cartridge.character_rom.clone());
+    pub fn load_mapper(&mut self, mapper: MapperInstance) {
+        self.mapper = Some(mapper.clone());
+        self.renderer.load_mapper(mapper);
     }
 
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
     fn mirror_nametable(&self, addr: u16) -> u16 {
+        let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
+
         // TODO: no idea how this works
         let mirrored_vram = addr & 0b10111111111111; // mirror down 0x3000-0x3eff to 0x2000 - 0x2eff
         let vram_index = mirrored_vram - 0x2000; // to vram vector
         let name_table = vram_index / 0x400; // to the name table index
-        match (&self.mirroring.unwrap(), name_table) {
+        match (mirroring, name_table) {
             (Mirroring::Vertical, 2) | (Mirroring::Vertical, 3) => vram_index - 0x800,
             (Mirroring::Horizontal, 2) => vram_index - 0x400,
             (Mirroring::Horizontal, 1) => vram_index - 0x400,
@@ -94,11 +96,10 @@ impl Ppu {
         if self.mask.show_background() {
             self.renderer.draw_background(
                 self.control.background_bank(),
+                self.control.nametable_start(),
+                &self.vram,
                 self.scroll.x,
                 self.scroll.y,
-                self.control.nametable_start(),
-                &self.mirroring.unwrap(),
-                &self.vram,
             );
         }
 
@@ -150,7 +151,7 @@ impl Ppu {
         self.increment_vram_address();
 
         if Self::PATTERN_TABLE_RANGE.contains(&addr) {
-            let result = self.renderer.pattern_table.as_ref().unwrap()[addr as usize];
+            let result = self.mapper.as_ref().unwrap().borrow_mut().read_ppu(addr);
             tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
             self.update_data_buffer(result)
         } else if Self::NAMETABLE_RANGE.contains(&addr) {

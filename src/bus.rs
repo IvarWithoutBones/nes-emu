@@ -1,11 +1,13 @@
 use crate::{
-    cartridge::Cartridge,
+    cartridge::{Cartridge, MapperInstance},
     controller,
     cpu::CpuRam,
     ppu::{self, renderer::PixelBuffer, Ppu},
 };
 use std::{
+    cell::RefCell,
     path::PathBuf,
+    rc::Rc,
     sync::mpsc::{channel, Receiver, Sender},
     time,
 };
@@ -49,7 +51,7 @@ pub trait Device {
 
 pub struct Bus {
     span: tracing::Span,
-    pub cartridge: Option<Cartridge>,
+    pub mapper: Option<MapperInstance>,
     pub cpu_ram: CpuRam,
     pub cycles: CycleCount,
     pub ppu: Ppu,
@@ -69,7 +71,7 @@ impl Bus {
         Bus {
             span,
             rom_receiver,
-            cartridge: None,
+            mapper: None,
             ppu: Ppu::new(pixel_sender),
             cpu_ram: CpuRam::default(),
             cycles: 0,
@@ -79,16 +81,17 @@ impl Bus {
     }
 
     pub fn load_cartridge(&mut self, cartridge: Cartridge) {
-        self.ppu.load_cartridge(&cartridge);
-        self.cartridge = Some(cartridge);
+        let cart = Rc::new(RefCell::new(cartridge.into()));
+        self.mapper = Some(cart.clone());
+        self.ppu.load_mapper(cart);
     }
 
-    pub fn has_cartridge(&mut self) -> bool {
+    pub fn has_mapper(&mut self) -> bool {
         if let Ok(path) = self.rom_receiver.try_recv() {
             let cartridge = Cartridge::from(path);
             self.load_cartridge(cartridge);
         }
-        self.cartridge.is_some()
+        self.mapper.is_some()
     }
 
     /// Generate a dummy bus, used for tests
@@ -112,11 +115,11 @@ impl Memory for Bus {
         } else if self.cpu_ram.contains(address) {
             self.cpu_ram[address]
         } else if self
-            .cartridge
+            .mapper
             .as_ref()
-            .map_or(false, |c| c.contains(address))
+            .map_or(false, |c| c.borrow().contains(address))
         {
-            self.cartridge.as_mut().unwrap().read_byte(address)
+            self.mapper.as_mut().unwrap().borrow_mut().read_cpu(address)
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
             if mutability.readable() {
                 tracing::trace!("PPU register {} read at ${:04X}", register, address);
@@ -171,9 +174,9 @@ impl Memory for Bus {
                 panic!()
             }
         } else if self
-            .cartridge
+            .mapper
             .as_ref()
-            .map_or(false, |c| c.contains(address))
+            .map_or(false, |c| c.borrow().contains(address))
         {
             tracing::error!(
                 "writing read-only program ROM at ${:04X}: ${:02X}",

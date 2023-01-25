@@ -1,6 +1,13 @@
+mod mapper;
+
 use bitflags::bitflags;
+pub use mapper::MapperInstance;
 use std::{fmt, path::PathBuf};
-use crate::bus::{Device, Memory};
+
+pub const PROGRAM_ROM_START: u16 = 0x8000;
+pub const PROGRAM_ROM_PAGE_SIZE: usize = 16 * 1024;
+pub const CHARACTER_ROM_PAGE_SIZE: usize = 8 * 1024;
+const TRAINER_SIZE: usize = 512;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Mirroring {
@@ -39,7 +46,7 @@ pub struct Header {
     pub program_rom_pages: usize,
     character_rom_pages: usize,
     has_trainer: bool,
-    mapper: u8,
+    mapper_id: u8,
 }
 
 const HEADER_SIZE: usize = 16;
@@ -55,7 +62,7 @@ impl Header {
         let flags_6 = Flags6::from_bits_retain(data[6]);
         let flags_7 = Flags7::from_bits_retain(data[7]);
 
-        let mapper = ((flags_6.bits() & Flags6::MAPPER_LOW.bits()) >> 4)
+        let mapper_id = ((flags_6.bits() & Flags6::MAPPER_LOW.bits()) >> 4)
             | (flags_7.bits() & Flags7::MAPPER_HIGH.bits());
 
         let mirroring = match (
@@ -72,7 +79,7 @@ impl Header {
             program_rom_pages: data[4] as usize,
             character_rom_pages: data[5] as usize,
             mirroring,
-            mapper,
+            mapper_id,
         })
     }
 
@@ -99,7 +106,6 @@ impl Header {
     }
 }
 
-#[derive(Clone)]
 pub struct Cartridge {
     pub header: Header,
     pub program_rom: Vec<u8>,
@@ -109,22 +115,13 @@ pub struct Cartridge {
 impl Cartridge {
     pub const SPAN_NAME: &'static str = "cartridge";
 
-    const PROGRAM_ROM_PAGE_SIZE: usize = 16 * 1024;
-    const CHARACTER_ROM_PAGE_SIZE: usize = 8 * 1024;
-    const TRAINER_SIZE: usize = 512;
-
     pub fn from_bytes(data: &[u8]) -> Result<Cartridge, String> {
         let _span = tracing::span!(tracing::Level::INFO, Cartridge::SPAN_NAME).entered();
         let header = Header::new(data[..HEADER_SIZE].try_into().unwrap())?;
-        let program_rom_size = header.program_rom_pages * Self::PROGRAM_ROM_PAGE_SIZE;
-        let character_rom_size = header.character_rom_pages * Self::CHARACTER_ROM_PAGE_SIZE;
+        let program_rom_size = header.program_rom_pages * PROGRAM_ROM_PAGE_SIZE;
+        let character_rom_size = header.character_rom_pages * CHARACTER_ROM_PAGE_SIZE;
 
-        let program_rom_start = HEADER_SIZE
-            + if header.has_trainer {
-                Self::TRAINER_SIZE
-            } else {
-                0
-            };
+        let program_rom_start = HEADER_SIZE + if header.has_trainer { TRAINER_SIZE } else { 0 };
 
         let character_rom_start = program_rom_start + program_rom_size;
 
@@ -140,7 +137,7 @@ impl Cartridge {
             character_rom_size
         );
         tracing::info!("{} mirroring", header.mirroring);
-        tracing::info!("mapper {}\n", header.mapper);
+        tracing::info!("mapper {}\n", header.mapper_id);
 
         Ok(Cartridge {
             program_rom: data[program_rom_start..(program_rom_start + program_rom_size)].to_vec(),
@@ -157,7 +154,7 @@ impl Cartridge {
         let mut program: Vec<u8> = vec![header, data].concat();
         let len = program.len();
         program.resize(
-            Self::PROGRAM_ROM_PAGE_SIZE + Self::CHARACTER_ROM_PAGE_SIZE + len,
+            PROGRAM_ROM_PAGE_SIZE + CHARACTER_ROM_PAGE_SIZE + len,
             0xEA, // NOP
         );
         program[len] = 0x00; // BRK
@@ -180,27 +177,5 @@ impl From<PathBuf> for Cartridge {
             );
             std::process::exit(1);
         })
-    }
-}
-
-const PROGRAM_ROM_START: u16 = 0x8000;
-
-impl Device for Cartridge {
-    fn contains(&self, address: u16) -> bool {
-        (PROGRAM_ROM_START..=0xFFFF).contains(&address)
-    }
-}
-
-impl Memory for Cartridge {
-    fn read_byte(&mut self, mut address: u16) -> u8 {
-        address -= PROGRAM_ROM_START;
-        if self.header.program_rom_pages == 1 {
-            address %= Self::PROGRAM_ROM_PAGE_SIZE as u16;
-        }
-        self.program_rom[address as usize]
-    }
-
-    fn write_byte(&mut self, _address: u16, _value: u8) {
-        unreachable!("cartridge is read-only");
     }
 }

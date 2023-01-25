@@ -1,5 +1,5 @@
 use super::{default_frame, header_label};
-use crate::cpu::{flags::CpuFlags, CpuState, CpuRam, StepState};
+use crate::cpu::{flags::CpuFlags, CpuRam, CpuState, StepState};
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;
 use std::{
