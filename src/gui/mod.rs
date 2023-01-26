@@ -242,7 +242,7 @@ impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         #[cfg(target_arch = "wasm32")]
         {
-            if self.cpu.bus.has_cartridge() {
+            if self.cpu.bus.has_mapper() {
                 for i in 0..20 {
                     self.cpu.step();
                 }

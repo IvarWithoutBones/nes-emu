@@ -29,8 +29,13 @@ impl Mapper for NROM {
         self.cartridge.character_rom[address as usize]
     }
 
-    fn write_ppu(&mut self, _address: u16, _value: u8) {
-        unreachable!("cartridge's character rom is read-only");
+    fn write_ppu(&mut self, address: u16, value: u8) {
+        self.cartridge.character_rom[address as usize] = value;
+        tracing::warn!(
+            "writing to normally read-only character rom: ${:04X} = ${:02X}",
+            address,
+            value
+        );
     }
 
     fn write_cpu(&mut self, _address: u16, _value: u8) {

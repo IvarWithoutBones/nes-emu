@@ -28,13 +28,13 @@ impl Mapper for UxROM {
         const LAST_BANK: u16 = PROGRAM_ROM_START + PROGRAM_ROM_PAGE_SIZE as u16;
         if (PROGRAM_ROM_START..LAST_BANK).contains(&address) {
             // Variable bank of program ROM
-            let bank = self.bank(self.bank_select as usize);
             address -= PROGRAM_ROM_START;
+            let bank = self.bank(self.bank_select as usize);
             self.cartridge.program_rom[bank + address as usize]
         } else if (LAST_BANK..=0xFFFF).contains(&address) {
             // Last 16KB of program ROM
-            let bank = self.bank(self.cartridge.header.program_rom_pages - 1);
             address -= LAST_BANK;
+            let bank = self.bank(self.cartridge.header.program_rom_pages - 1);
             self.cartridge.program_rom[bank + address as usize]
         } else {
             panic!("invalid address: ${:04X}", address);
@@ -42,8 +42,8 @@ impl Mapper for UxROM {
     }
 
     fn write_cpu(&mut self, _address: u16, value: u8) {
-        const BANK_SELECT_MASK: u8 = 0b0000_1111;
-        self.bank_select = value & BANK_SELECT_MASK;
+        // Select a program ROM bank mapped to $8000-$BFFF
+        self.bank_select = value & 0b0000_1111;
     }
 
     fn read_ppu(&mut self, address: u16) -> u8 {

@@ -131,12 +131,10 @@ impl Memory for Bus {
                     address
                 );
                 0
-                // panic!()
             }
         } else {
-            tracing::error!("unimplemented read at ${:04X}", address);
+            tracing::warn!("unimplemented read at ${:04X}", address);
             0
-            // panic!()
         }
     }
 
@@ -184,8 +182,7 @@ impl Memory for Bus {
                 .borrow_mut()
                 .write_cpu(address, data);
         } else {
-            tracing::error!("unimplemented write at ${:04X}: ${:02X}", address, data);
-            // panic!()
+            tracing::warn!("unimplemented write at ${:04X}: ${:02X}", address, data);
         }
     }
 }
