@@ -1,14 +1,14 @@
 use crate::bus::{Clock, CycleCount, Memory};
 use crate::cpu::{addressing_mode::AdressingMode, Cpu, CpuFlags};
 
-/// A single instruction, with addressing mode.
+/// An instruction identifier
 struct Opcode {
     code: &'static u8,
     cycles: &'static CycleCount,
     mode: &'static AdressingMode,
 }
 
-/// A collection of instructions using the same function
+/// A collection of opcodes sharing the same functionality
 pub struct Instruction {
     pub name: &'static str,
     pub function: fn(cpu: &mut Cpu, mode: &AdressingMode),
@@ -17,58 +17,72 @@ pub struct Instruction {
 }
 
 impl Instruction {
-    /// Returns an instruction from a given opcode, or None if this instruction does not contain it
-    fn find(&self, code: &u8) -> Option<(&Instruction, &AdressingMode, &CycleCount)> {
-        for opcode in self.opcodes {
-            if opcode.code == code {
-                return Some((self, opcode.mode, opcode.cycles));
-            }
-        }
-        None
-    }
-
-    /// Search through all instructions for a given opcode, and return its metadata
-    pub fn decode(
-        code: &u8,
-    ) -> Option<(
-        &'static Instruction,
-        &'static AdressingMode,
-        &'static CycleCount,
-    )> {
-        INSTRUCTIONS.iter().find_map(|i| i.find(code))
-    }
-
-    /// Format the instruction to a human-readable string, used for debugging
+    /// Format the instruction to a human-readable string, useful for debugging
     pub fn format(&self, cpu: &mut Cpu, mode: &AdressingMode) -> String {
-        let mut args = String::new();
+        let mut str = self.name.to_owned() + " ";
+        // TODO: formatting of indirect modes
         match *mode {
+            AdressingMode::Accumulator => str += "A",
             AdressingMode::Immediate => {
-                args = format!("#${:02X}", mode.fetch_param(cpu).0);
+                str += format!("#${:02X}", mode.fetch_param(cpu).0).as_str()
             }
-
             AdressingMode::Relative => {
                 // TODO: this is hacky, instructions seem to work fine though
-                args = format!("${:02X}", mode.fetch_param_address(cpu).0.wrapping_add(1));
+                str += format!("${:02X}", mode.fetch_param_address(cpu).0.wrapping_add(1)).as_str()
             }
-
             AdressingMode::ZeroPage => {
-                args = format!("${:02X}", mode.fetch_param_address(cpu).0);
+                str += format!("${:02X}", mode.fetch_param_address(cpu).0).as_str()
             }
-
-            AdressingMode::Accumulator => {
-                args = "A".to_string();
-            }
-
-            // TODO: formatting of indirect modes
             _ => {
                 if mode.has_arguments() {
-                    args = format!("${:04X}", mode.fetch_param_address(cpu).0)
+                    str += format!("${:04X}", mode.fetch_param_address(cpu).0).as_str()
                 }
             }
         }
-
-        format!("{} {}", self.name, args,)
+        str
     }
+}
+
+/// Fetch an instruction using the given opcode, returns None if the opcode isnt supported
+#[inline]
+pub fn decode(
+    opcode: u8,
+) -> Option<(
+    &'static Instruction,
+    &'static AdressingMode,
+    &'static CycleCount,
+)> {
+    let (instr, opcode_index) = INSTRUCTIONS[opcode as usize]?;
+    Some((
+        instr,
+        instr.opcodes[opcode_index].mode,
+        instr.opcodes[opcode_index].cycles,
+    ))
+}
+
+/// A collection of all instructions, indexable by opcode. The second element of the tuple is an index into 'Instruction.opcodes'
+type InstructionArray = [Option<(&'static Instruction, usize)>; INSTRUCTION_ARRAY_LEN];
+const INSTRUCTION_ARRAY_LEN: usize = 0x100;
+
+/// Sorts an InstructionArray so that it can be indexed by opcode
+const fn sort_by_opcode(input: InstructionArray) -> InstructionArray {
+    let mut output: InstructionArray = [None; INSTRUCTION_ARRAY_LEN];
+    let mut idx = 0;
+    // This will be much nicer when for loops are stable in const fn's, fine for now though
+    while idx < input.len() {
+        if let Some(instr) = input[idx] {
+            let mut op_idx = 0;
+            while op_idx < instr.0.opcodes.len() {
+                let opcode = *instr.0.opcodes[op_idx].code as usize;
+                // Check if the opcode is defined multiple times
+                assert!(output[opcode].is_none());
+                output[opcode] = Some((instr.0, op_idx));
+                op_idx += 1;
+            }
+        }
+        idx += 1;
+    }
+    output
 }
 
 /*
@@ -100,10 +114,9 @@ fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
 }
 
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
-mod instruction_impls {
-    use crate::util;
-
+mod instrs {
     use super::*;
+    use crate::util;
 
     pub fn nop(cpu: &mut Cpu, mode: &AdressingMode) {
         if mode.has_arguments() {
@@ -567,10 +580,17 @@ mod instruction_impls {
     }
 }
 
-// A macro to make defining instructions less verbose
+macro_rules! gen_instructions {
+    ($($instrs: tt),*) => {{
+        // Note: the second tuple element is the index of 'opcodes' inside the Instruction struct, will be set by sort_opcodes
+        self::sort_by_opcode(crate::util::expand_array(&[$(($instrs, 0)),*]))
+    }}
+}
+
+// Less verbose way to define an Instruction
 macro_rules! instr {
     ($name: expr, $function: expr, $($opcodes: tt),*) => {
-        Instruction {
+        &Instruction {
             name: $name,
             function: $function,
             changes_program_counter: false,
@@ -583,7 +603,7 @@ macro_rules! instr {
     };
 
     ($name: expr, $changes_pc: expr, $function: expr, $($opcodes: tt),*) => {
-        Instruction {
+        &Instruction {
             name: $name,
             function: $function,
             changes_program_counter: $changes_pc,
@@ -597,357 +617,345 @@ macro_rules! instr {
 }
 
 #[rustfmt::skip]
-const INSTRUCTIONS: [Instruction; 68] = [
-    instr!("BRK", true, instruction_impls::brk, (0x00, 7, &AdressingMode::Implied)),
-    instr!("RTI", true, instruction_impls::rti, (0x40, 6, &AdressingMode::Implied)),
+pub const INSTRUCTIONS: InstructionArray = gen_instructions!(
+    (instr!("BRK", true, instrs::brk, (0x00, 7, AdressingMode::Implied))),
+    (instr!("RTI", true, instrs::rti, (0x40, 6, AdressingMode::Implied))),
 
-    instr!("BCS", true, instruction_impls::bcs, (0xB0, 2, &AdressingMode::Relative)),
-    instr!("BCC", true, instruction_impls::bcc, (0x90, 2, &AdressingMode::Relative)),
-    instr!("BEQ", true, instruction_impls::beq, (0xF0, 2, &AdressingMode::Relative)),
-    instr!("BNE", true, instruction_impls::bne, (0xD0, 2, &AdressingMode::Relative)),
-    instr!("BMI", true, instruction_impls::bmi, (0x30, 2, &AdressingMode::Relative)),
-    instr!("BPL", true, instruction_impls::bpl, (0x10, 2, &AdressingMode::Relative)),
-    instr!("BVS", true, instruction_impls::bvs, (0x70, 2, &AdressingMode::Relative)),
-    instr!("BVC", true, instruction_impls::bvc, (0x50, 2, &AdressingMode::Relative)),
+    (instr!("BCS", true, instrs::bcs, (0xB0, 2, AdressingMode::Relative))),
+    (instr!("BCC", true, instrs::bcc, (0x90, 2, AdressingMode::Relative))),
+    (instr!("BEQ", true, instrs::beq, (0xF0, 2, AdressingMode::Relative))),
+    (instr!("BNE", true, instrs::bne, (0xD0, 2, AdressingMode::Relative))),
+    (instr!("BMI", true, instrs::bmi, (0x30, 2, AdressingMode::Relative))),
+    (instr!("BPL", true, instrs::bpl, (0x10, 2, AdressingMode::Relative))),
+    (instr!("BVS", true, instrs::bvs, (0x70, 2, AdressingMode::Relative))),
+    (instr!("BVC", true, instrs::bvc, (0x50, 2, AdressingMode::Relative))),
 
-    instr!("CLV", instruction_impls::clv, (0xB8, 2, &AdressingMode::Implied)),
-    instr!("CLC", instruction_impls::clc, (0x18, 2, &AdressingMode::Implied)),
-    instr!("CLD", instruction_impls::cld, (0xD8, 2, &AdressingMode::Implied)),
-    instr!("CLI", instruction_impls::cli, (0x58, 2, &AdressingMode::Implied)),
-    instr!("SEC", instruction_impls::sec, (0x38, 2, &AdressingMode::Implied)),
-    instr!("SED", instruction_impls::sed, (0xF8, 2, &AdressingMode::Implied)),
-    instr!("SEI", instruction_impls::sei, (0x78, 2, &AdressingMode::Implied)),
+    (instr!("CLV", instrs::clv, (0xB8, 2, AdressingMode::Implied))),
+    (instr!("CLC", instrs::clc, (0x18, 2, AdressingMode::Implied))),
+    (instr!("CLD", instrs::cld, (0xD8, 2, AdressingMode::Implied))),
+    (instr!("CLI", instrs::cli, (0x58, 2, AdressingMode::Implied))),
+    (instr!("SEC", instrs::sec, (0x38, 2, AdressingMode::Implied))),
+    (instr!("SED", instrs::sed, (0xF8, 2, AdressingMode::Implied))),
+    (instr!("SEI", instrs::sei, (0x78, 2, AdressingMode::Implied))),
 
-    instr!("TAX", instruction_impls::tax, (0xAA, 2, &AdressingMode::Implied)),
-    instr!("TAY", instruction_impls::tay, (0xA8, 2, &AdressingMode::Implied)),
-    instr!("TXA", instruction_impls::txa, (0x8A, 2, &AdressingMode::Implied)),
-    instr!("TYA", instruction_impls::tya,
-        (0x98, 2, &AdressingMode::Implied),
-        (0x89, 2, &AdressingMode::Implied)
-    ),
+    (instr!("TAX", instrs::tax, (0xAA, 2, AdressingMode::Implied))),
+    (instr!("TAY", instrs::tay, (0xA8, 2, AdressingMode::Implied))),
+    (instr!("TXA", instrs::txa, (0x8A, 2, AdressingMode::Implied))),
+    (instr!("TYA", instrs::tya, (0x98, 2, AdressingMode::Implied))),
 
-    instr!("JSR", true, instruction_impls::jsr, (0x20, 6, &AdressingMode::Absolute)),
-    instr!("RTS", true, instruction_impls::rts, (0x60, 6, &AdressingMode::Implied)),
-    instr!("PHP", instruction_impls::php, (0x08, 3, &AdressingMode::Implied)),
-    instr!("PLP", instruction_impls::plp, (0x28, 4, &AdressingMode::Implied)),
-    instr!("PHA", instruction_impls::pha, (0x48, 3, &AdressingMode::Implied)),
-    instr!("PLA", instruction_impls::pla, (0x68, 4, &AdressingMode::Implied)),
-    instr!("TSX", instruction_impls::tsx, (0xBA, 2, &AdressingMode::Implied)),
-    instr!("TXS", instruction_impls::txs, (0x9A, 2, &AdressingMode::Implied)),
+    (instr!("JSR", true, instrs::jsr, (0x20, 6, AdressingMode::Absolute))),
+    (instr!("RTS", true, instrs::rts, (0x60, 6, AdressingMode::Implied))),
+    (instr!("PHP", instrs::php, (0x08, 3, AdressingMode::Implied))),
+    (instr!("PLP", instrs::plp, (0x28, 4, AdressingMode::Implied))),
+    (instr!("PHA", instrs::pha, (0x48, 3, AdressingMode::Implied))),
+    (instr!("PLA", instrs::pla, (0x68, 4, AdressingMode::Implied))),
+    (instr!("TSX", instrs::tsx, (0xBA, 2, AdressingMode::Implied))),
+    (instr!("TXS", instrs::txs, (0x9A, 2, AdressingMode::Implied))),
 
-    instr!("NOP", instruction_impls::nop,
-        (0x80, 2, &AdressingMode::Immediate),
-        (0x82, 2, &AdressingMode::Immediate),
-        (0x89, 2, &AdressingMode::Immediate),
-        (0xC2, 2, &AdressingMode::Immediate),
-        (0xE2, 2, &AdressingMode::Immediate),
-        (0xEA, 2, &AdressingMode::Implied),
-        (0x1A, 2, &AdressingMode::Implied),
-        (0x3A, 2, &AdressingMode::Implied),
-        (0x5A, 2, &AdressingMode::Implied),
-        (0x7A, 2, &AdressingMode::Implied),
-        (0xDA, 2, &AdressingMode::Implied),
-        (0xFA, 2, &AdressingMode::Implied),
-        (0xFA, 2, &AdressingMode::Implied),
-        (0x0C, 4, &AdressingMode::Absolute),
-        (0x1C, 4, &AdressingMode::AbsoluteX),
-        (0x3C, 4, &AdressingMode::AbsoluteX),
-        (0x5C, 4, &AdressingMode::AbsoluteX),
-        (0x7C, 4, &AdressingMode::AbsoluteX),
-        (0xDC, 4, &AdressingMode::AbsoluteX),
-        (0xFC, 4, &AdressingMode::AbsoluteX),
-        (0x04, 3, &AdressingMode::ZeroPage),
-        (0x44, 3, &AdressingMode::ZeroPage),
-        (0x64, 3, &AdressingMode::ZeroPage),
-        (0x14, 4, &AdressingMode::ZeroPageX),
-        (0x34, 4, &AdressingMode::ZeroPageX),
-        (0x54, 4, &AdressingMode::ZeroPageX),
-        (0x74, 4, &AdressingMode::ZeroPageX),
-        (0xD4, 4, &AdressingMode::ZeroPageX),
-        (0xF4, 4, &AdressingMode::ZeroPageX)
-    ),
+    (instr!("JMP", true, instrs::jmp,
+        (0x4C, 3, AdressingMode::Absolute),
+        (0x6C, 5, AdressingMode::Indirect)
+    )),
 
-    instr!("BIT", instruction_impls::bit,
-        (0x24, 3, &AdressingMode::ZeroPage),
-        (0x2C, 4, &AdressingMode::Absolute)
-    ),
+    (instr!("NOP", instrs::nop,
+        (0x80, 2, AdressingMode::Immediate),
+        (0x82, 2, AdressingMode::Immediate),
+        (0x89, 2, AdressingMode::Immediate),
+        (0xC2, 2, AdressingMode::Immediate),
+        (0xE2, 2, AdressingMode::Immediate),
+        (0xEA, 2, AdressingMode::Implied),
+        (0x1A, 2, AdressingMode::Implied),
+        (0x3A, 2, AdressingMode::Implied),
+        (0x5A, 2, AdressingMode::Implied),
+        (0x7A, 2, AdressingMode::Implied),
+        (0xDA, 2, AdressingMode::Implied),
+        (0xFA, 2, AdressingMode::Implied),
+        (0x0C, 4, AdressingMode::Absolute),
+        (0x1C, 4, AdressingMode::AbsoluteX),
+        (0x3C, 4, AdressingMode::AbsoluteX),
+        (0x5C, 4, AdressingMode::AbsoluteX),
+        (0x7C, 4, AdressingMode::AbsoluteX),
+        (0xDC, 4, AdressingMode::AbsoluteX),
+        (0xFC, 4, AdressingMode::AbsoluteX),
+        (0x04, 3, AdressingMode::ZeroPage),
+        (0x44, 3, AdressingMode::ZeroPage),
+        (0x64, 3, AdressingMode::ZeroPage),
+        (0x14, 4, AdressingMode::ZeroPageX),
+        (0x34, 4, AdressingMode::ZeroPageX),
+        (0x54, 4, AdressingMode::ZeroPageX),
+        (0x74, 4, AdressingMode::ZeroPageX),
+        (0xD4, 4, AdressingMode::ZeroPageX),
+        (0xF4, 4, AdressingMode::ZeroPageX)
+    )),
 
-    instr!("JMP", true, instruction_impls::jmp,
-        (0x4C, 3, &AdressingMode::Absolute),
-        (0x6C, 5, &AdressingMode::Indirect)
-    ),
+    (instr!("BIT", instrs::bit,
+        (0x24, 3, AdressingMode::ZeroPage),
+        (0x2C, 4, AdressingMode::Absolute)
+    )),
 
-    instr!("INX", instruction_impls::inx, (0xE8, 2, &AdressingMode::Implied)),
-    instr!("INY", instruction_impls::iny, (0xC8, 2, &AdressingMode::Implied)),
-    instr!("INC", instruction_impls::inc,
-        (0xE6, 5, &AdressingMode::ZeroPage),
-        (0xF6, 6, &AdressingMode::ZeroPageX),
-        (0xEE, 6, &AdressingMode::Absolute),
-        (0xFE, 7, &AdressingMode::AbsoluteX)
-    ),
+    (instr!("INX", instrs::inx, (0xE8, 2, AdressingMode::Implied))),
+    (instr!("INY", instrs::iny, (0xC8, 2, AdressingMode::Implied))),
+    (instr!("INC", instrs::inc,
+        (0xE6, 5, AdressingMode::ZeroPage),
+        (0xF6, 6, AdressingMode::ZeroPageX),
+        (0xEE, 6, AdressingMode::Absolute),
+        (0xFE, 7, AdressingMode::AbsoluteX)
+    )),
 
-    instr!("DEX", instruction_impls::dex, (0xCA, 2, &AdressingMode::Implied)),
-    instr!("DEY", instruction_impls::dey, (0x88, 2, &AdressingMode::Implied)),
-    instr!("DEC", instruction_impls::dec,
-        (0xC6, 5, &AdressingMode::ZeroPage),
-        (0xD6, 6, &AdressingMode::ZeroPageX),
-        (0xCE, 6, &AdressingMode::Absolute),
-        (0xDE, 7, &AdressingMode::AbsoluteX)
-    ),
+    (instr!("DEX", instrs::dex, (0xCA, 2, AdressingMode::Implied))),
+    (instr!("DEY", instrs::dey, (0x88, 2, AdressingMode::Implied))),
+    (instr!("DEC", instrs::dec,
+        (0xC6, 5, AdressingMode::ZeroPage),
+        (0xD6, 6, AdressingMode::ZeroPageX),
+        (0xCE, 6, AdressingMode::Absolute),
+        (0xDE, 7, AdressingMode::AbsoluteX)
+    )),
 
-    instr!("ADC", instruction_impls::adc,
-        (0x69, 2, &AdressingMode::Immediate),
-        (0x65, 3, &AdressingMode::ZeroPage),
-        (0x75, 4, &AdressingMode::ZeroPageX),
-        (0x6D, 4, &AdressingMode::Absolute),
-        (0x7D, 4, &AdressingMode::AbsoluteX),
-        (0x79, 4, &AdressingMode::AbsoluteY),
-        (0x61, 6, &AdressingMode::IndirectX),
-        (0x71, 5, &AdressingMode::IndirectY)
-    ),
+    (instr!("ADC", instrs::adc,
+        (0x69, 2, AdressingMode::Immediate),
+        (0x65, 3, AdressingMode::ZeroPage),
+        (0x75, 4, AdressingMode::ZeroPageX),
+        (0x6D, 4, AdressingMode::Absolute),
+        (0x7D, 4, AdressingMode::AbsoluteX),
+        (0x79, 4, AdressingMode::AbsoluteY),
+        (0x61, 6, AdressingMode::IndirectX),
+        (0x71, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("SBC", instrs::sbc,
+         (0xE9, 2, AdressingMode::Immediate),
+         (0xEB, 2, AdressingMode::Immediate), // Undocumented
+         (0xE5, 3, AdressingMode::ZeroPage),
+         (0xF5, 4, AdressingMode::ZeroPageX),
+         (0xED, 4, AdressingMode::Absolute),
+         (0xFD, 4, AdressingMode::AbsoluteX),
+         (0xF9, 4, AdressingMode::AbsoluteY),
+         (0xE1, 6, AdressingMode::IndirectX),
+         (0xF1, 5, AdressingMode::IndirectY)
+     )),
 
-    instr!("SBC", instruction_impls::sbc,
-        (0xE9, 2, &AdressingMode::Immediate),
-        (0xEB, 2, &AdressingMode::Immediate), // Undocumented
-        (0xE5, 3, &AdressingMode::ZeroPage),
-        (0xF5, 4, &AdressingMode::ZeroPageX),
-        (0xED, 4, &AdressingMode::Absolute),
-        (0xFD, 4, &AdressingMode::AbsoluteX),
-        (0xF9, 4, &AdressingMode::AbsoluteY),
-        (0xE1, 6, &AdressingMode::IndirectX),
-        (0xF1, 5, &AdressingMode::IndirectY)
-    ),
+     (instr!("LSR", instrs::lsr,
+         (0x4A, 2, AdressingMode::Accumulator),
+         (0x46, 5, AdressingMode::ZeroPage),
+         (0x56, 6, AdressingMode::ZeroPageX),
+         (0x4E, 6, AdressingMode::Absolute),
+         (0x5E, 7, AdressingMode::AbsoluteX)
+     )),
+    
+     (instr!("ASL", instrs::asl,
+         (0x0A, 2, AdressingMode::Accumulator),
+         (0x06, 5, AdressingMode::ZeroPage),
+         (0x16, 6, AdressingMode::ZeroPageX),
+         (0x0E, 6, AdressingMode::Absolute),
+         (0x1E, 7, AdressingMode::AbsoluteX)
+     )),
+    
+     (instr!("ROL", instrs::rol,
+         (0x2A, 2, AdressingMode::Accumulator),
+         (0x26, 5, AdressingMode::ZeroPage),
+         (0x36, 6, AdressingMode::ZeroPageX),
+         (0x2E, 6, AdressingMode::Absolute),
+         (0x3E, 7, AdressingMode::AbsoluteX)
+     )),
 
-    instr!("LSR", instruction_impls::lsr,
-        (0x4A, 2, &AdressingMode::Accumulator),
-        (0x46, 5, &AdressingMode::ZeroPage),
-        (0x56, 6, &AdressingMode::ZeroPageX),
-        (0x4E, 6, &AdressingMode::Absolute),
-        (0x5E, 7, &AdressingMode::AbsoluteX)
-    ),
+     (instr!("ROR", instrs::ror,
+         (0x6A, 2, AdressingMode::Accumulator),
+         (0x66, 5, AdressingMode::ZeroPage),
+         (0x76, 6, AdressingMode::ZeroPageX),
+         (0x6E, 6, AdressingMode::Absolute),
+         (0x7E, 7, AdressingMode::AbsoluteX)
+     )),
+    
+     (instr!("AND", instrs::and,
+         (0x29, 2, AdressingMode::Immediate),
+         (0x25, 3, AdressingMode::ZeroPage),
+         (0x35, 4, AdressingMode::ZeroPageX),
+         (0x2D, 4, AdressingMode::Absolute),
+         (0x3D, 4, AdressingMode::AbsoluteX),
+         (0x39, 4, AdressingMode::AbsoluteY),
+         (0x21, 6, AdressingMode::IndirectX),
+         (0x31, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("EOR", instrs::eor,
+         (0x49, 2, AdressingMode::Immediate),
+         (0x45, 3, AdressingMode::ZeroPage),
+         (0x55, 4, AdressingMode::ZeroPageX),
+         (0x4D, 4, AdressingMode::Absolute),
+         (0x5D, 4, AdressingMode::AbsoluteX),
+         (0x59, 4, AdressingMode::AbsoluteY),
+         (0x41, 6, AdressingMode::IndirectX),
+         (0x51, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("ORA", instrs::ora,
+         (0x09, 2, AdressingMode::Immediate),
+         (0x05, 3, AdressingMode::ZeroPage),
+         (0x15, 4, AdressingMode::ZeroPageX),
+         (0x0D, 4, AdressingMode::Absolute),
+         (0x1D, 4, AdressingMode::AbsoluteX),
+         (0x19, 4, AdressingMode::AbsoluteY),
+         (0x01, 6, AdressingMode::IndirectX),
+         (0x11, 5, AdressingMode::IndirectY)
+     )),
 
-    instr!("ASL", instruction_impls::asl,
-        (0x0A, 2, &AdressingMode::Accumulator),
-        (0x06, 5, &AdressingMode::ZeroPage),
-        (0x16, 6, &AdressingMode::ZeroPageX),
-        (0x0E, 6, &AdressingMode::Absolute),
-        (0x1E, 7, &AdressingMode::AbsoluteX)
-    ),
+     (instr!("CMP", instrs::cmp,
+         (0xC9, 2, AdressingMode::Immediate),
+         (0xC5, 3, AdressingMode::ZeroPage),
+         (0xD5, 4, AdressingMode::ZeroPageX),
+         (0xCD, 4, AdressingMode::Absolute),
+         (0xDD, 4, AdressingMode::AbsoluteX),
+         (0xD9, 4, AdressingMode::AbsoluteY),
+         (0xC1, 6, AdressingMode::IndirectX),
+         (0xD1, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("CPX", instrs::cpx,
+         (0xE0, 2, AdressingMode::Immediate),
+         (0xE4, 3, AdressingMode::ZeroPage),
+         (0xEC, 4, AdressingMode::Absolute)
+     )),
+    
+     (instr!("CPY", instrs::cpy,
+         (0xC0, 2, AdressingMode::Immediate),
+         (0xC4, 3, AdressingMode::ZeroPage),
+         (0xCC, 4, AdressingMode::Absolute)
+     )),
+    
+     (instr!("LDA", instrs::lda,
+         (0xA9, 2, AdressingMode::Immediate),
+         (0xA5, 3, AdressingMode::ZeroPage),
+         (0xB5, 4, AdressingMode::ZeroPageX),
+         (0xAD, 4, AdressingMode::Absolute),
+         (0xBD, 4, AdressingMode::AbsoluteX),
+         (0xB9, 4, AdressingMode::AbsoluteY),
+         (0xA1, 6, AdressingMode::IndirectX),
+         (0xB1, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("LDX", instrs::ldx,
+         (0xA2, 2, AdressingMode::Immediate),
+         (0xA6, 3, AdressingMode::ZeroPage),
+         (0xB6, 4, AdressingMode::ZeroPageY),
+         (0xAE, 4, AdressingMode::Absolute),
+         (0xBE, 4, AdressingMode::AbsoluteY)
+     )),
 
-    instr!("ROL", instruction_impls::rol,
-        (0x2A, 2, &AdressingMode::Accumulator),
-        (0x26, 5, &AdressingMode::ZeroPage),
-        (0x36, 6, &AdressingMode::ZeroPageX),
-        (0x2E, 6, &AdressingMode::Absolute),
-        (0x3E, 7, &AdressingMode::AbsoluteX)
-    ),
+     (instr!("LDY", instrs::ldy,
+         (0xA0, 2, AdressingMode::Immediate),
+         (0xA4, 3, AdressingMode::ZeroPage),
+         (0xB4, 4, AdressingMode::ZeroPageX),
+         (0xAC, 4, AdressingMode::Absolute),
+         (0xBC, 4, AdressingMode::AbsoluteX)
+     )),
+    
+     (instr!("STA", instrs::sta,
+         (0x85, 3, AdressingMode::ZeroPage),
+         (0x95, 4, AdressingMode::ZeroPageX),
+         (0x8D, 4, AdressingMode::Absolute),
+         (0x9D, 5, AdressingMode::AbsoluteX),
+         (0x99, 5, AdressingMode::AbsoluteY),
+         (0x81, 6, AdressingMode::IndirectX),
+         (0x91, 6, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("STX", instrs::stx,
+         (0x86, 3, AdressingMode::ZeroPage),
+         (0x96, 4, AdressingMode::ZeroPageY),
+         (0x8E, 4, AdressingMode::Absolute)
+     )),
+    
+     (instr!("STY", instrs::sty,
+         (0x84, 3, AdressingMode::ZeroPage),
+         (0x94, 4, AdressingMode::ZeroPageX),
+         (0x8C, 4, AdressingMode::Absolute)
+     )),
 
-    instr!("ROR", instruction_impls::ror,
-        (0x6A, 2, &AdressingMode::Accumulator),
-        (0x66, 5, &AdressingMode::ZeroPage),
-        (0x76, 6, &AdressingMode::ZeroPageX),
-        (0x6E, 6, &AdressingMode::Absolute),
-        (0x7E, 7, &AdressingMode::AbsoluteX)
-    ),
+     // Undocumented opcodes
 
-    instr!("AND", instruction_impls::and,
-        (0x29, 2, &AdressingMode::Immediate),
-        (0x25, 3, &AdressingMode::ZeroPage),
-        (0x35, 4, &AdressingMode::ZeroPageX),
-        (0x2D, 4, &AdressingMode::Absolute),
-        (0x3D, 4, &AdressingMode::AbsoluteX),
-        (0x39, 4, &AdressingMode::AbsoluteY),
-        (0x21, 6, &AdressingMode::IndirectX),
-        (0x31, 5, &AdressingMode::IndirectY)
-    ),
+     (instr!("ANE", instrs::ane, (0x8B, 2, AdressingMode::Immediate))),
+     (instr!("LAS", instrs::las, (0xBB, 4, AdressingMode::AbsoluteY))),
+     (instr!("ALR", instrs::alr, (0x4B, 2, AdressingMode::Immediate))),
+    
+     (instr!("LAX", instrs::lax,
+         (0xAB, 2, AdressingMode::Immediate),
+         (0xA7, 3, AdressingMode::ZeroPage),
+         (0xB7, 4, AdressingMode::ZeroPageY),
+         (0xAF, 4, AdressingMode::Absolute),
+         (0xBF, 4, AdressingMode::AbsoluteY),
+         (0xA3, 6, AdressingMode::IndirectX),
+         (0xB3, 5, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("SAX", instrs::sax,
+         (0x87, 3, AdressingMode::ZeroPage),
+         (0x97, 4, AdressingMode::ZeroPageY),
+         (0x8F, 4, AdressingMode::Absolute),
+         (0x83, 6, AdressingMode::IndirectX)
+     )),
+    
+     (instr!("DCP", instrs::dcp,
+         (0xC7, 5, AdressingMode::ZeroPage),
+         (0xD7, 6, AdressingMode::ZeroPageX),
+         (0xCF, 6, AdressingMode::Absolute),
+         (0xDF, 7, AdressingMode::AbsoluteX),
+         (0xDB, 7, AdressingMode::AbsoluteY),
+         (0xC3, 8, AdressingMode::IndirectX),
+         (0xD3, 8, AdressingMode::IndirectY)
+     )),
 
-    instr!("EOR", instruction_impls::eor,
-        (0x49, 2, &AdressingMode::Immediate),
-        (0x45, 3, &AdressingMode::ZeroPage),
-        (0x55, 4, &AdressingMode::ZeroPageX),
-        (0x4D, 4, &AdressingMode::Absolute),
-        (0x5D, 4, &AdressingMode::AbsoluteX),
-        (0x59, 4, &AdressingMode::AbsoluteY),
-        (0x41, 6, &AdressingMode::IndirectX),
-        (0x51, 5, &AdressingMode::IndirectY)
-    ),
+     (instr!("ISC", instrs::isc,
+         (0xE7, 5, AdressingMode::ZeroPage),
+         (0xF7, 6, AdressingMode::ZeroPageX),
+         (0xEF, 6, AdressingMode::Absolute),
+         (0xFF, 7, AdressingMode::AbsoluteX),
+         (0xFB, 7, AdressingMode::AbsoluteY),
+         (0xE3, 8, AdressingMode::IndirectX),
+         (0xF3, 8, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("SLO", instrs::slo,
+         (0x07, 5, AdressingMode::ZeroPage),
+         (0x17, 6, AdressingMode::ZeroPageX),
+         (0x0F, 6, AdressingMode::Absolute),
+         (0x1F, 7, AdressingMode::AbsoluteX),
+         (0x1B, 7, AdressingMode::AbsoluteY),
+         (0x03, 8, AdressingMode::IndirectX),
+         (0x13, 8, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("RLA", instrs::rla,
+         (0x27, 5, AdressingMode::ZeroPage),
+         (0x37, 6, AdressingMode::ZeroPageX),
+         (0x2F, 6, AdressingMode::Absolute),
+         (0x3F, 7, AdressingMode::AbsoluteX),
+         (0x3B, 7, AdressingMode::AbsoluteY),
+         (0x23, 8, AdressingMode::IndirectX),
+         (0x33, 8, AdressingMode::IndirectY)
+     )),
+    
+     (instr!("SRE", instrs::sre,
+         (0x47, 5, AdressingMode::ZeroPage),
+         (0x57, 6, AdressingMode::ZeroPageX),
+         (0x4F, 6, AdressingMode::Absolute),
+         (0x5F, 7, AdressingMode::AbsoluteX),
+         (0x5B, 7, AdressingMode::AbsoluteY),
+         (0x43, 8, AdressingMode::IndirectX),
+         (0x53, 8, AdressingMode::IndirectY)
+     )),
+    
+    (instr!("RRA", instrs::rra,
+        (0x67, 5, AdressingMode::ZeroPage),
+        (0x77, 6, AdressingMode::ZeroPageX),
+        (0x6F, 6, AdressingMode::Absolute),
+        (0x7F, 7, AdressingMode::AbsoluteX),
+        (0x7B, 7, AdressingMode::AbsoluteY),
+        (0x63, 8, AdressingMode::IndirectX),
+        (0x73, 8, AdressingMode::IndirectY)
+    )),
 
-    instr!("ORA", instruction_impls::ora,
-        (0x09, 2, &AdressingMode::Immediate),
-        (0x05, 3, &AdressingMode::ZeroPage),
-        (0x15, 4, &AdressingMode::ZeroPageX),
-        (0x0D, 4, &AdressingMode::Absolute),
-        (0x1D, 4, &AdressingMode::AbsoluteX),
-        (0x19, 4, &AdressingMode::AbsoluteY),
-        (0x01, 6, &AdressingMode::IndirectX),
-        (0x11, 5, &AdressingMode::IndirectY)
-    ),
-
-    instr!("CMP", instruction_impls::cmp,
-        (0xC9, 2, &AdressingMode::Immediate),
-        (0xC5, 3, &AdressingMode::ZeroPage),
-        (0xD5, 4, &AdressingMode::ZeroPageX),
-        (0xCD, 4, &AdressingMode::Absolute),
-        (0xDD, 4, &AdressingMode::AbsoluteX),
-        (0xD9, 4, &AdressingMode::AbsoluteY),
-        (0xC1, 6, &AdressingMode::IndirectX),
-        (0xD1, 5, &AdressingMode::IndirectY)
-    ),
-
-    instr!("CPX", instruction_impls::cpx,
-        (0xE0, 2, &AdressingMode::Immediate),
-        (0xE4, 3, &AdressingMode::ZeroPage),
-        (0xEC, 4, &AdressingMode::Absolute)
-    ),
-
-    instr!("CPY", instruction_impls::cpy,
-        (0xC0, 2, &AdressingMode::Immediate),
-        (0xC4, 3, &AdressingMode::ZeroPage),
-        (0xCC, 4, &AdressingMode::Absolute)
-    ),
-
-    instr!("LDA", instruction_impls::lda,
-        (0xA9, 2, &AdressingMode::Immediate),
-        (0xA5, 3, &AdressingMode::ZeroPage),
-        (0xB5, 4, &AdressingMode::ZeroPageX),
-        (0xAD, 4, &AdressingMode::Absolute),
-        (0xBD, 4, &AdressingMode::AbsoluteX),
-        (0xB9, 4, &AdressingMode::AbsoluteY),
-        (0xA1, 6, &AdressingMode::IndirectX),
-        (0xB1, 5, &AdressingMode::IndirectY)
-    ),
-
-    instr!("LDX", instruction_impls::ldx,
-        (0xA2, 2, &AdressingMode::Immediate),
-        (0xA6, 3, &AdressingMode::ZeroPage),
-        (0xB6, 4, &AdressingMode::ZeroPageY),
-        (0xAE, 4, &AdressingMode::Absolute),
-        (0xBE, 4, &AdressingMode::AbsoluteY)
-    ),
-
-    instr!("LDY", instruction_impls::ldy,
-        (0xA0, 2, &AdressingMode::Immediate),
-        (0xA4, 3, &AdressingMode::ZeroPage),
-        (0xB4, 4, &AdressingMode::ZeroPageX),
-        (0xAC, 4, &AdressingMode::Absolute),
-        (0xBC, 4, &AdressingMode::AbsoluteX)
-    ),
-
-    instr!("STA", instruction_impls::sta,
-        (0x85, 3, &AdressingMode::ZeroPage),
-        (0x95, 4, &AdressingMode::ZeroPageX),
-        (0x8D, 4, &AdressingMode::Absolute),
-        (0x9D, 5, &AdressingMode::AbsoluteX),
-        (0x99, 5, &AdressingMode::AbsoluteY),
-        (0x81, 6, &AdressingMode::IndirectX),
-        (0x91, 6, &AdressingMode::IndirectY)
-    ),
-
-    instr!("STX", instruction_impls::stx,
-        (0x86, 3, &AdressingMode::ZeroPage),
-        (0x96, 4, &AdressingMode::ZeroPageY),
-        (0x8E, 4, &AdressingMode::Absolute)
-    ),
-
-    instr!("STY", instruction_impls::sty,
-        (0x84, 3, &AdressingMode::ZeroPage),
-        (0x94, 4, &AdressingMode::ZeroPageX),
-        (0x8C, 4, &AdressingMode::Absolute)
-    ),
-
-    // Undocumented opcodes
-
-    instr!("ANE", instruction_impls::ane,
-        (0x8B, 2, &AdressingMode::Immediate)
-    ),
-
-    instr!("LAS", instruction_impls::las,
-        (0xBB, 4, &AdressingMode::AbsoluteY)
-    ),
-
-    instr!("LAX", instruction_impls::lax,
-        (0xAB, 2, &AdressingMode::Immediate),
-        (0xA7, 3, &AdressingMode::ZeroPage),
-        (0xB7, 4, &AdressingMode::ZeroPageY),
-        (0xAF, 4, &AdressingMode::Absolute),
-        (0xBF, 4, &AdressingMode::AbsoluteY),
-        (0xA3, 6, &AdressingMode::IndirectX),
-        (0xB3, 5, &AdressingMode::IndirectY)
-    ),
-
-    instr!("SAX", instruction_impls::sax,
-        (0x87, 3, &AdressingMode::ZeroPage),
-        (0x97, 4, &AdressingMode::ZeroPageY),
-        (0x8F, 4, &AdressingMode::Absolute),
-        (0x83, 6, &AdressingMode::IndirectX)
-    ),
-
-    instr!("DCP", instruction_impls::dcp,
-        (0xC7, 5, &AdressingMode::ZeroPage),
-        (0xD7, 6, &AdressingMode::ZeroPageX),
-        (0xCF, 6, &AdressingMode::Absolute),
-        (0xDF, 7, &AdressingMode::AbsoluteX),
-        (0xDB, 7, &AdressingMode::AbsoluteY),
-        (0xC3, 8, &AdressingMode::IndirectX),
-        (0xD3, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("ISC", instruction_impls::isc,
-        (0xE7, 5, &AdressingMode::ZeroPage),
-        (0xF7, 6, &AdressingMode::ZeroPageX),
-        (0xEF, 6, &AdressingMode::Absolute),
-        (0xFF, 7, &AdressingMode::AbsoluteX),
-        (0xFB, 7, &AdressingMode::AbsoluteY),
-        (0xE3, 8, &AdressingMode::IndirectX),
-        (0xF3, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("SLO", instruction_impls::slo,
-        (0x07, 5, &AdressingMode::ZeroPage),
-        (0x17, 6, &AdressingMode::ZeroPageX),
-        (0x0F, 6, &AdressingMode::Absolute),
-        (0x1F, 7, &AdressingMode::AbsoluteX),
-        (0x1B, 7, &AdressingMode::AbsoluteY),
-        (0x03, 8, &AdressingMode::IndirectX),
-        (0x13, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("RLA", instruction_impls::rla,
-        (0x27, 5, &AdressingMode::ZeroPage),
-        (0x37, 6, &AdressingMode::ZeroPageX),
-        (0x2F, 6, &AdressingMode::Absolute),
-        (0x3F, 7, &AdressingMode::AbsoluteX),
-        (0x3B, 7, &AdressingMode::AbsoluteY),
-        (0x23, 8, &AdressingMode::IndirectX),
-        (0x33, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("SRE", instruction_impls::sre,
-        (0x47, 5, &AdressingMode::ZeroPage),
-        (0x57, 6, &AdressingMode::ZeroPageX),
-        (0x4F, 6, &AdressingMode::Absolute),
-        (0x5F, 7, &AdressingMode::AbsoluteX),
-        (0x5B, 7, &AdressingMode::AbsoluteY),
-        (0x43, 8, &AdressingMode::IndirectX),
-        (0x53, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("RRA", instruction_impls::rra,
-        (0x67, 5, &AdressingMode::ZeroPage),
-        (0x77, 6, &AdressingMode::ZeroPageX),
-        (0x6F, 6, &AdressingMode::Absolute),
-        (0x7F, 7, &AdressingMode::AbsoluteX),
-        (0x7B, 7, &AdressingMode::AbsoluteY),
-        (0x63, 8, &AdressingMode::IndirectX),
-        (0x73, 8, &AdressingMode::IndirectY)
-    ),
-
-    instr!("ALR", instruction_impls::alr,
-        (0x4B, 2, &AdressingMode::Immediate)
-    ),
-
-    instr!("ANC", instruction_impls::anc,
-        (0x2B, 2, &AdressingMode::Immediate),
-        (0x0B, 2, &AdressingMode::Immediate)
-    )
-];
+    (instr!("ANC", instrs::anc,
+        (0x2B, 2, AdressingMode::Immediate),
+        (0x0B, 2, AdressingMode::Immediate)
+    ))
+);

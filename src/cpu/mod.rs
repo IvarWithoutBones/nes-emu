@@ -10,7 +10,6 @@ use crate::{
     util,
 };
 use flags::CpuFlags;
-use instructions::Instruction;
 use std::{
     fmt,
     ops::{Index, IndexMut},
@@ -167,7 +166,7 @@ impl Cpu {
         }
 
         let opcode = self.read_byte(self.program_counter);
-        let (instr, mode, cycles) = Instruction::decode(&opcode).unwrap_or_else(|| {
+        let (instr, mode, cycles) = instructions::decode(opcode).unwrap_or_else(|| {
             panic!(
                 "invalid opcode ${:02X} at PC ${:04X}",
                 opcode, self.program_counter

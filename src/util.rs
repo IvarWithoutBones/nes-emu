@@ -25,3 +25,19 @@ pub const fn nth_bit(value: u8, n: u8) -> bool {
 pub const fn combine_bools(high: bool, low: bool) -> u8 {
     ((1 & high as u8) << 1) | (1 & low as u8)
 }
+
+/// Expand an array of T into an array of Option<T>, filling the unknown elements with None.
+pub const fn expand_array<T, const IN_LEN: usize, const OUT_LEN: usize>(
+    input: &[T; IN_LEN],
+) -> [Option<T>; OUT_LEN]
+where
+    T: Copy,
+{
+    let mut expanded = [None; OUT_LEN];
+    let mut i = 0;
+    while i < input.len() {
+        expanded[i] = Some(input[i]);
+        i += 1;
+    }
+    expanded
+}
