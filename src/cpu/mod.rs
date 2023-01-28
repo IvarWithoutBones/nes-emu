@@ -9,6 +9,7 @@ use crate::{
     ppu::renderer::PixelBuffer,
     util,
 };
+pub use addressing_mode::AdressingMode;
 use flags::CpuFlags;
 use std::{
     fmt,
@@ -160,7 +161,7 @@ impl Cpu {
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
-    pub fn step(&mut self) -> Option<Box<CpuState>> {
+    pub fn step(&mut self) -> Option<CpuState> {
         if self.bus.ppu.poll_nmi() {
             self.non_maskable_interrupt();
         }
@@ -198,7 +199,7 @@ impl Cpu {
         }
 
         self.tick(*cycles);
-        Some(Box::new(state))
+        Some(state)
     }
 }
 
@@ -241,7 +242,7 @@ pub fn spawn_thread(
     button_receiver: Receiver<controller::Buttons>,
     pixel_sender: Sender<Box<PixelBuffer>>,
     rom_receiver: Receiver<PathBuf>,
-    state_sender: Option<Sender<Box<CpuState>>>,
+    state_sender: Option<Sender<CpuState>>,
     step_receiver: Option<Receiver<StepState>>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {

@@ -46,7 +46,7 @@ impl Gui {
     fn new(
         span: tracing::Span,
         log_reload_handle: Handle<LevelFilter, Registry>,
-        cpu_state_receiver: Receiver<Box<CpuState>>,
+        cpu_state_receiver: Receiver<CpuState>,
         step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
@@ -77,7 +77,7 @@ impl Gui {
     pub fn run(
         window_title: &str,
         log_reload_handle: Handle<LevelFilter, Registry>,
-        cpu_state_receiver: Receiver<Box<CpuState>>,
+        cpu_state_receiver: Receiver<CpuState>,
         step_sender: Sender<StepState>,
         rom_sender: Sender<PathBuf>,
         button_sender: Sender<controller::Buttons>,

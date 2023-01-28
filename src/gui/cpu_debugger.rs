@@ -9,9 +9,9 @@ use std::{
 
 pub struct CpuDebugger {
     span: tracing::Span,
-    cpu_state_receiver: Receiver<Box<CpuState>>,
     cpu_states: Vec<CpuState>,
     selected_cpu_state_index: Option<usize>,
+    cpu_state_receiver: Receiver<CpuState>,
 
     step_sender: Sender<StepState>,
     step_state: StepState,
@@ -30,7 +30,7 @@ impl CpuDebugger {
     }
 
     pub fn new(
-        cpu_state_receiver: Receiver<Box<CpuState>>,
+        cpu_state_receiver: Receiver<CpuState>,
         step_sender: Sender<StepState>,
     ) -> Self {
         let mut mem_viewer_options =
@@ -62,8 +62,6 @@ impl CpuDebugger {
 
     /// Returns a widget containing the CPU debugger, to be drawn with egui
     pub fn widget(&mut self) -> impl egui::Widget + '_ {
-        self.update_buffer();
-
         move |ui: &mut egui::Ui| {
             ui.horizontal(|ui| {
                 egui::SidePanel::left("disassembly")
@@ -109,7 +107,7 @@ impl CpuDebugger {
     pub fn update_buffer(&mut self) {
         // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {
-            self.cpu_states.push(*state);
+            self.cpu_states.push(state);
             // Trim the cache if it gets too big, so we don't run out of memory.
             if self.cpu_states.len() > (Self::MAX_CPU_STATES + Self::CPU_STATES_BUFFER) {
                 self.cpu_states.drain(0..Self::CPU_STATES_BUFFER);

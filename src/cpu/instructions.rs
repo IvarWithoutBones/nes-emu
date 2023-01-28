@@ -1,5 +1,5 @@
+use super::{AdressingMode, Cpu, CpuFlags};
 use crate::bus::{Clock, CycleCount, Memory};
-use crate::cpu::{addressing_mode::AdressingMode, Cpu, CpuFlags};
 
 /// An instruction identifier
 struct Opcode {
