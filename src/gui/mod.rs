@@ -113,7 +113,7 @@ impl Gui {
     pub fn run(
         _window_title: &str,
         log_reload_handle: Handle<LevelFilter, Registry>,
-        cpu_state_receiver: Receiver<Box<CpuState>>,
+        cpu_state_receiver: Receiver<CpuState>,
         step_sender: Sender<StepState>,
         rom_sender: Sender<PathBuf>,
         button_sender: Sender<controller::Buttons>,

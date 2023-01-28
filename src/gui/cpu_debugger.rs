@@ -1,5 +1,8 @@
 use super::{default_frame, header_label};
-use crate::cpu::{flags::CpuFlags, CpuRam, CpuState, StepState};
+use crate::{
+    cpu::{flags::CpuFlags, CpuRam, CpuState, StepState},
+    util::CircularBuffer,
+};
 use eframe::egui;
 use egui_memory_editor::MemoryEditor;
 use std::{
@@ -9,9 +12,10 @@ use std::{
 
 pub struct CpuDebugger {
     span: tracing::Span,
-    cpu_states: Vec<CpuState>,
-    selected_cpu_state_index: Option<usize>,
+
     cpu_state_receiver: Receiver<CpuState>,
+    cpu_states: CircularBuffer<CpuState, 500>,
+    selected_cpu_state_index: Option<usize>,
 
     step_sender: Sender<StepState>,
     step_state: StepState,
@@ -22,17 +26,11 @@ pub struct CpuDebugger {
 }
 
 impl CpuDebugger {
-    const MAX_CPU_STATES: usize = 500;
-    const CPU_STATES_BUFFER: usize = 100;
-
     fn span() -> tracing::Span {
         tracing::span!(tracing::Level::INFO, "cpu_debugger")
     }
 
-    pub fn new(
-        cpu_state_receiver: Receiver<CpuState>,
-        step_sender: Sender<StepState>,
-    ) -> Self {
+    pub fn new(cpu_state_receiver: Receiver<CpuState>, step_sender: Sender<StepState>) -> Self {
         let mut mem_viewer_options =
             egui_memory_editor::option_data::MemoryEditorOptions::default();
 
@@ -48,7 +46,7 @@ impl CpuDebugger {
         Self {
             span: Self::span(),
             cpu_state_receiver,
-            cpu_states: Vec::new(),
+            cpu_states: CircularBuffer::new(),
             selected_cpu_state_index: None,
 
             step_sender,
@@ -85,12 +83,11 @@ impl CpuDebugger {
     }
 
     fn selected_or_last_cpu_state(&self) -> Option<&CpuState> {
-        let selected_index = if self.selected_cpu_state_index.is_some() {
-            self.selected_cpu_state_index.unwrap()
+        if let Some(index) = self.selected_cpu_state_index {
+            self.cpu_states[index].as_ref()
         } else {
-            self.cpu_states.len().saturating_sub(1)
-        };
-        self.cpu_states.get(selected_index)
+            self.cpu_states.last()
+        }
     }
 
     pub fn toggle_pause(&mut self) {
@@ -105,13 +102,8 @@ impl CpuDebugger {
     }
 
     pub fn update_buffer(&mut self) {
-        // TODO: Cache the actual strings we need to render, computing them every frame is expensive.
         while let Ok(state) = self.cpu_state_receiver.try_recv() {
             self.cpu_states.push(state);
-            // Trim the cache if it gets too big, so we don't run out of memory.
-            if self.cpu_states.len() > (Self::MAX_CPU_STATES + Self::CPU_STATES_BUFFER) {
-                self.cpu_states.drain(0..Self::CPU_STATES_BUFFER);
-            }
         }
     }
 

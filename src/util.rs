@@ -1,4 +1,5 @@
 use bitflags::BitFlags;
+use std::ops::{Index, IndexMut};
 
 /// Format a flag in a BitFlags enabled struct.
 pub trait FormatBitFlags {
@@ -40,4 +41,58 @@ where
         i += 1;
     }
     expanded
+}
+
+/// A fixed size circular buffer.
+pub struct CircularBuffer<T, const N: usize> {
+    data: [Option<T>; N],
+    current: usize,
+}
+
+impl<T, const N: usize> CircularBuffer<T, N> {
+    const DEFAULT: Option<T> = None;
+
+    pub const fn new() -> Self {
+        Self {
+            data: [Self::DEFAULT; N],
+            current: 0,
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        N
+    }
+
+    /// Push a value into the buffer, overwriting the oldest value if the buffer is full.
+    pub fn push(&mut self, value: T) {
+        self.data[self.current] = Some(value);
+        self.current = self.current.wrapping_add(1) % N;
+    }
+
+    /// Get the last value pushed into the buffer.
+    pub fn last(&self) -> Option<&T> {
+        self.data[self.current].as_ref()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        let start = self.current;
+        let end = self.current.wrapping_add(N);
+        (start..end).map(move |i| self.data[i % N].as_ref().unwrap())
+    }
+}
+
+impl<T, const N: usize> Index<usize> for CircularBuffer<T, N> {
+    type Output = Option<T>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        assert!(index < N, "index out of bounds: {} >= {}", index, N);
+        &self.data[index % N]
+    }
+}
+
+impl<T, const N: usize> IndexMut<usize> for CircularBuffer<T, N> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        assert!(index < N, "index out of bounds: {} >= {}", index, N);
+        &mut self.data[index % N]
+    }
 }
