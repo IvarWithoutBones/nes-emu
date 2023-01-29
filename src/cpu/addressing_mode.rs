@@ -120,7 +120,7 @@ impl AdressingMode {
             }
 
             _ => {
-                panic!("addressing mode {} has no arguments!", self);
+                panic!("addressing mode {self} has no arguments!");
             }
         }
     }

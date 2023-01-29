@@ -40,7 +40,7 @@ impl std::fmt::Display for Status {
         string.push(self.format(Self::VBlankStarted, 'V'));
         string.push(self.format(Self::SpriteZeroHit, 'Z'));
         string.push(self.format(Self::SpriteOverflow, 'O'));
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
 

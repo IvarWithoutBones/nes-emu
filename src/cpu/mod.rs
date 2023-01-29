@@ -5,8 +5,6 @@ mod instructions;
 
 use crate::{
     bus::{Bus, Clock, CycleCount, Device, Memory},
-    controller,
-    ppu::renderer::PixelBuffer,
     util,
 };
 pub use addressing_mode::AdressingMode;
@@ -14,8 +12,6 @@ use flags::CpuFlags;
 use std::{
     fmt,
     ops::{Index, IndexMut},
-    path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
 };
 
 /// Writable memory for the CPU
@@ -233,86 +229,6 @@ impl fmt::Display for Cpu {
             self.bus.cycles,
             self.flags
         )
-    }
-}
-
-/// Spawn and run the CPU in a separate thread
-#[cfg(not(target_arch = "wasm32"))]
-pub fn spawn_thread(
-    button_receiver: Receiver<controller::Buttons>,
-    pixel_sender: Sender<Box<PixelBuffer>>,
-    rom_receiver: Receiver<PathBuf>,
-    state_sender: Option<Sender<CpuState>>,
-    step_receiver: Option<Receiver<StepState>>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let bus = Bus::new(button_receiver, pixel_sender, rom_receiver);
-        let mut cpu = Cpu::new(bus);
-        let mut step_state = StepState::default();
-
-        while !cpu.bus.has_mapper() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        cpu.reset();
-
-        loop {
-            if let Some(step_receiver) = step_receiver.as_ref() {
-                if let Ok(new_step_state) = step_receiver.try_recv() {
-                    step_state = new_step_state;
-                }
-
-                if step_state.paused {
-                    if step_state.step {
-                        step_state.step = false;
-                    } else {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                        continue;
-                    }
-                }
-            }
-
-            if let Some(instr_state) = cpu.step() {
-                if let Some(ref cpu_state_sender) = state_sender {
-                    if cpu_state_sender.send(instr_state).is_err() {
-                        tracing::error!("failed to send CPU state, exiting cpu thread");
-                        // GUI has died, so the CPU should too.
-                        break;
-                    };
-                }
-            } else {
-                tracing::error!("error while stepping the CPU, exiting cpu thread");
-                // Some sort of error occured, should communicate to the GUI in the future.
-                break;
-            }
-        }
-    })
-}
-
-/// State of execution. This is used to step per-instruction and to pause the CPU.
-#[derive(Clone)]
-pub struct StepState {
-    pub paused: bool,
-    pub step: bool,
-}
-
-impl Default for StepState {
-    fn default() -> Self {
-        Self {
-            paused: false,
-            step: true,
-        }
-    }
-}
-
-impl StepState {
-    pub fn step(&mut self) {
-        self.step = true;
-        self.paused = true;
-    }
-
-    pub fn toggle_pause(&mut self) {
-        self.paused = !self.paused;
     }
 }
 

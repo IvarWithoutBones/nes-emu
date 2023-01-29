@@ -37,7 +37,7 @@ impl Mapper for UxROM {
             let bank = self.bank(self.cartridge.header.program_rom_pages - 1);
             self.cartridge.program_rom[bank + address as usize]
         } else {
-            panic!("invalid address: ${:04X}", address);
+            panic!("invalid address: ${address:04X}")
         }
     }
 

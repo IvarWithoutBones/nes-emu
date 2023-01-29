@@ -192,10 +192,7 @@ impl Renderer {
                 (&vram[0x400..0x800], &vram[0..0x400])
             }
 
-            _ => panic!(
-                "unimplemented mirroring mode ({}, ${:04X})",
-                mirroring, nametable_addr
-            ),
+            _ => panic!("unimplemented mirroring mode ({mirroring}, ${nametable_addr:04X})",),
         };
 
         self.draw_nametable(

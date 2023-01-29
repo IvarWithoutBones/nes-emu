@@ -85,14 +85,14 @@ impl<T, const N: usize> Index<usize> for CircularBuffer<T, N> {
     type Output = Option<T>;
 
     fn index(&self, index: usize) -> &Self::Output {
-        assert!(index < N, "index out of bounds: {} >= {}", index, N);
+        assert!(index < N, "index out of bounds: {index} >= {N}");
         &self.data[index % N]
     }
 }
 
 impl<T, const N: usize> IndexMut<usize> for CircularBuffer<T, N> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        assert!(index < N, "index out of bounds: {} >= {}", index, N);
+        assert!(index < N, "index out of bounds: {index} >= {N}");
         &mut self.data[index % N]
     }
 }

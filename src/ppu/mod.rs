@@ -8,7 +8,13 @@ use crate::cartridge::{MapperInstance, Mirroring};
 use object_attribute::{Object, ObjectAttributeMemory};
 use registers::Register;
 use renderer::{PixelBuffer, Renderer};
-use std::{ops::RangeInclusive, sync::mpsc::Sender};
+use std::{
+    ops::RangeInclusive,
+    sync::mpsc::{Receiver, Sender},
+};
+
+pub type PixelReceiver = Receiver<Box<PixelBuffer>>;
+pub type PixelSender = Sender<Box<PixelBuffer>>;
 
 const VIDEO_RAM_SIZE: usize = 0x800;
 pub type VideoRam = [u8; VIDEO_RAM_SIZE];

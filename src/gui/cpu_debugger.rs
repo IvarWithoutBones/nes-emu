@@ -1,6 +1,7 @@
 use super::{default_frame, header_label};
 use crate::{
-    cpu::{flags::CpuFlags, CpuRam, CpuState, StepState},
+    cpu::{flags::CpuFlags, CpuRam, CpuState},
+    glue::StepState,
     util::CircularBuffer,
 };
 use eframe::egui;
@@ -195,7 +196,7 @@ impl CpuDebugger {
             egui::Grid::new("registers").striped(true).show(ui, |ui| {
                 let label = |ui: &mut egui::Ui, text: &str, num: u8| {
                     ui.label(text);
-                    ui.label(format!("${:02X}", num));
+                    ui.label(format!("${num:02X}"));
                     ui.end_row();
                 };
 

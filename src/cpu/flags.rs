@@ -47,6 +47,6 @@ impl std::fmt::Display for CpuFlags {
         string.push(self.format(Self::InterruptsDisabled, 'I'));
         string.push(self.format(Self::Zero, 'Z'));
         string.push(self.format(Self::Carry, 'C'));
-        write!(f, "{}", string)
+        write!(f, "{string}")
     }
 }
