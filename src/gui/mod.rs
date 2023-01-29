@@ -2,21 +2,23 @@ mod cpu_debugger;
 mod input;
 mod screen;
 
-use crate::{
-    controller,
-    cpu::CpuState,
-    glue::StepState,
-    ppu::renderer::{PixelBuffer, HEIGHT, WIDTH},
+use {
+    self::{cpu_debugger::CpuDebugger, input::Input, screen::Screen},
+    crate::{
+        controller,
+        cpu::CpuState,
+        glue::StepState,
+        ppu::renderer::{PixelBuffer, HEIGHT, WIDTH},
+        LogReloadHandle,
+    },
+    eframe::egui,
+    std::{
+        path::PathBuf,
+        sync::mpsc::{Receiver, Sender},
+    },
+    tracing::metadata::LevelFilter,
+    tracing_subscriber::EnvFilter,
 };
-use cpu_debugger::CpuDebugger;
-use eframe::egui;
-use input::Input;
-use screen::Screen;
-use std::{
-    path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
-};
-use tracing_subscriber::{filter::LevelFilter, reload::Handle, Registry};
 
 #[derive(PartialEq)]
 enum View {
@@ -32,14 +34,14 @@ pub struct Gui {
     input: Input,
     rom_sender: Sender<PathBuf>,
 
-    log_reload_handle: Handle<LevelFilter, Registry>,
+    log_reload_handle: LogReloadHandle,
     log_level: LevelFilter,
 }
 
 impl Gui {
     pub fn run(
         window_title: &str,
-        log_reload_handle: Handle<LevelFilter, Registry>,
+        log_reload_handle: LogReloadHandle,
         cpu_state_receiver: Receiver<CpuState>,
         step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
@@ -48,8 +50,9 @@ impl Gui {
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
         let log_level = log_reload_handle
-            .clone_current()
-            .unwrap_or(LevelFilter::INFO);
+            .with_current(|current| current.max_level_hint())
+            .unwrap_or(Some(LevelFilter::ERROR))
+            .unwrap();
 
         const INITIAL_SCALE: f32 = 3.0;
         let options = eframe::NativeOptions {
@@ -135,7 +138,6 @@ impl Gui {
             });
 
             ui.menu_button("Log", |ui| {
-                self.log_level_button(ui, LevelFilter::OFF);
                 self.log_level_button(ui, LevelFilter::ERROR);
                 self.log_level_button(ui, LevelFilter::WARN);
                 self.log_level_button(ui, LevelFilter::INFO);
@@ -148,11 +150,11 @@ impl Gui {
     fn log_level_button(&mut self, ui: &mut egui::Ui, level: LevelFilter) {
         let button = ui.radio_value(&mut self.log_level, level, level.to_string());
         if button.clicked() {
-            tracing::info!("switching log level to {}", level);
+            tracing::info!("switching log level to {level}");
             self.log_reload_handle
-                .modify(|filter| *filter = level)
+                .modify(|filter| *filter = EnvFilter::from(level.to_string()))
                 .unwrap_or_else(|err| {
-                    tracing::error!("failed to modify log level: {}", err);
+                    tracing::error!("failed to modify log level: {err}");
                 });
             ui.close_menu();
         }

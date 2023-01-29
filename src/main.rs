@@ -11,15 +11,32 @@ use {
     clap::Parser,
     glue::EmulatorUi,
     gui::Gui,
-    std::str::FromStr,
     tracing_subscriber::{
-        filter::{self, LevelFilter},
+        filter::{LevelFilter, ParseError},
         fmt,
         prelude::*,
         reload::{self, Handle},
-        Registry,
+        EnvFilter, Registry,
     },
 };
+
+pub type LogReloadHandle = Handle<EnvFilter, Registry>;
+
+fn tracing_init(log_level: Option<String>) -> Result<LogReloadHandle, ParseError> {
+    let filter = EnvFilter::builder()
+        // Disabling regex is recommanded when parsing from untrusted sources
+        .with_regex(false)
+        .with_default_directive(LevelFilter::ERROR.into())
+        .parse(log_level.unwrap_or_default())?;
+    let (filter, reload_handle) = reload::Layer::new(filter);
+
+    tracing_subscriber::registry()
+        .with(filter)
+        // Do not display 'nes-emu' and the time in every log message
+        .with(fmt::layer().without_time().with_target(false))
+        .init();
+    Ok(reload_handle)
+}
 
 #[derive(Parser)]
 #[command(author = "IvarWithoutBones", about = "A NES emulator written in Rust.")]
@@ -30,25 +47,9 @@ struct Args {
     #[arg(short, long)]
     without_gui: bool,
 
-    // TODO: EnvFilter is currently broken
     // https://docs.rs/tracing-subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html#example-syntax
-    // Without the GUI framework cluttering logs: '--log-level tracing,eframe=info'
     #[arg(short, long)]
     log_level: Option<String>,
-}
-
-fn tracing_init(
-    log_level: Option<String>,
-) -> Result<Handle<LevelFilter, Registry>, filter::LevelParseError> {
-    let log_level = log_level.unwrap_or_else(|| "info".to_string());
-    let filter = filter::LevelFilter::from_str(&log_level)?;
-    let (filter, reload_handle) = reload::Layer::new(filter);
-    tracing_subscriber::registry()
-        .with(filter)
-        // Do not display 'nes-emu' and the time in every log message
-        .with(fmt::layer().without_time().with_target(false))
-        .init();
-    Ok(reload_handle)
 }
 
 impl EmulatorUi for Gui {
@@ -67,8 +68,11 @@ impl EmulatorUi for Gui {
 
 fn main() {
     let args = Args::parse();
-    let log_reload_handle = tracing_init(args.log_level).unwrap_or_else(|err| {
-        eprintln!("invalid log level: {err}");
+    let log_reload_handle = tracing_init(args.log_level.clone()).unwrap_or_else(|err| {
+        eprintln!(
+            "failed to set log level '{}': {err}",
+            args.log_level.unwrap()
+        );
         std::process::exit(1);
     });
 

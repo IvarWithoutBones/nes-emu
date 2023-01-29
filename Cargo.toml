@@ -10,13 +10,17 @@ debug = true
 # Bit flag manipulation
 bitflags = "2.0.0-rc.1"
 
-# Logging
-tracing = "0.1.37"
-tracing-subscriber = "0.3.16"
-
-# Gui
+# Gui utilities
 egui_memory_editor = "0.2.2"
 rfd = "0.10.0" # File dialog
+
+# Logging
+tracing = "0.1.37"
+[dependencies.tracing-subscriber]
+version = "0.3.16"
+features = ["env-filter"]
+
+# Gui itself
 [dependencies.eframe]
 version = "0.20.1"
 default-features = false

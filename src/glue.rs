@@ -3,12 +3,11 @@
 // It would also be nice to make the GUI emulator-agnostic, but that requires more work.
 
 use {
-    crate::{bus, controller, cpu, ppu},
+    crate::{bus, controller, cpu, ppu, LogReloadHandle},
     std::{
         path::PathBuf,
         sync::mpsc::{channel, Receiver, Sender},
     },
-    tracing_subscriber::{filter::LevelFilter, reload::Handle, Registry},
 };
 
 /// State of execution. This is used to step per-instruction and to pause the CPU.
@@ -100,7 +99,7 @@ pub struct UiCommunication {
     pub rom_sender: Sender<PathBuf>,
     pub cpu_state_receiver: Option<Receiver<cpu::CpuState>>,
     pub step_sender: Option<Sender<StepState>>,
-    pub log_reload_handle: Handle<LevelFilter, Registry>,
+    pub log_reload_handle: LogReloadHandle,
 }
 
 pub trait EmulatorUi {
@@ -109,7 +108,7 @@ pub trait EmulatorUi {
 
 pub fn init(
     with_gui: bool,
-    log_reload_handle: Handle<LevelFilter, Registry>,
+    log_reload_handle: LogReloadHandle,
 ) -> (CpuCommunication, UiCommunication) {
     let (rom_sender, rom_receiver) = channel();
 
