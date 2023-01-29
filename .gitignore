@@ -12,5 +12,9 @@
 /roms
 *.log
 
-# WASI
+# WASM
 /dist
+
+# Profiling
+perf.data
+perf.data.old

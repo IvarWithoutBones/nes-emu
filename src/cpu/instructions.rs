@@ -4,8 +4,9 @@ use crate::bus::{Clock, CycleCount, Memory};
 /// An instruction identifier
 struct Opcode {
     code: &'static u8,
-    cycles: &'static CycleCount,
     mode: &'static AdressingMode,
+    // TODO: generate this based on memory reads
+    cycles: &'static CycleCount,
 }
 
 /// A collection of opcodes sharing the same functionality
@@ -17,22 +18,25 @@ pub struct Instruction {
 }
 
 impl Instruction {
-    /// Format the instruction to a human-readable string, useful for debugging
     pub fn format(&self, cpu: &mut Cpu, mode: &AdressingMode) -> String {
         let mut str = self.name.to_owned() + " ";
         // TODO: formatting of indirect modes
         match *mode {
             AdressingMode::Accumulator => str += "A",
+
             AdressingMode::Immediate => {
                 str += format!("#${:02X}", mode.fetch_param(cpu).0).as_str()
             }
+
             AdressingMode::Relative => {
-                // TODO: this is hacky, instructions seem to work fine though
-                str += format!("${:02X}", mode.fetch_param_address(cpu).0.wrapping_add(1)).as_str()
+                // TODO: format the relative address
+                str += format!("${:02X}", cpu.program_counter.wrapping_add(mode.len())).as_str()
             }
+
             AdressingMode::ZeroPage => {
                 str += format!("${:02X}", mode.fetch_param_address(cpu).0).as_str()
             }
+
             _ => {
                 if mode.has_arguments() {
                     str += format!("${:04X}", mode.fetch_param_address(cpu).0).as_str()
@@ -43,74 +47,21 @@ impl Instruction {
     }
 }
 
-/// Fetch an instruction using the given opcode, returns None if the opcode isnt supported
-#[inline]
-pub fn decode(
-    opcode: u8,
-) -> Option<(
-    &'static Instruction,
-    &'static AdressingMode,
-    &'static CycleCount,
-)> {
-    let (instr, opcode_index) = INSTRUCTIONS[opcode as usize]?;
-    Some((
-        instr,
-        instr.opcodes[opcode_index].mode,
-        instr.opcodes[opcode_index].cycles,
-    ))
-}
-
-/// A collection of all instructions, indexable by opcode. The second element of the tuple is an index into 'Instruction.opcodes'
-type InstructionArray = [Option<(&'static Instruction, usize)>; INSTRUCTION_ARRAY_LEN];
-const INSTRUCTION_ARRAY_LEN: usize = 0x100;
-
-/// Sorts an InstructionArray so that it can be indexed by opcode
-const fn sort_by_opcode(input: InstructionArray) -> InstructionArray {
-    let mut output: InstructionArray = [None; INSTRUCTION_ARRAY_LEN];
-    let mut idx = 0;
-    // This will be much nicer when for loops are stable in const fn's, fine for now though
-    while idx < input.len() {
-        if let Some(instr) = input[idx] {
-            let mut op_idx = 0;
-            while op_idx < instr.0.opcodes.len() {
-                let opcode = *instr.0.opcodes[op_idx].code as usize;
-                // Check if the opcode is defined multiple times
-                assert!(output[opcode].is_none());
-                output[opcode] = Some((instr.0, op_idx));
-                op_idx += 1;
-            }
-        }
-        idx += 1;
-    }
-    output
-}
-
 /*
     Instruction helpers
 */
 
 fn branch(cpu: &mut Cpu, mode: &AdressingMode, condition: bool) {
-    // TODO: should some of this be moved to the addressing mode?
-    let after_opcode = cpu.program_counter.wrapping_add(mode.len());
     if condition {
-        let offset = mode.fetch_param(cpu).0;
-        cpu.tick(1);
+        let (value, page_crossed) = mode.fetch_param_address(cpu);
+        cpu.program_counter = value;
 
-        // Two's complement signed offset to branch backwards
-        let new_pc = if offset > (u8::MAX / 2) {
-            after_opcode.wrapping_sub(offset.wrapping_neg() as u16)
-        } else {
-            after_opcode.wrapping_add(offset as u16)
-        };
-
-        if Cpu::is_on_different_page(after_opcode, new_pc) {
-            cpu.tick(1);
-        }
-
-        cpu.program_counter = new_pc;
-        return;
+        // One additional cycle if always taken if the condition is met
+        let cycles = if page_crossed { 2 } else { 1 };
+        cpu.tick(cycles);
+    } else {
+        cpu.program_counter = cpu.program_counter.wrapping_add(mode.len());
     }
-    cpu.program_counter = after_opcode;
 }
 
 /// https://www.nesdev.org/obelisk-6502-guide/reference.html
@@ -580,11 +531,50 @@ mod instrs {
     }
 }
 
-macro_rules! gen_instructions {
-    ($($instrs: tt),*) => {{
-        // Note: the second tuple element is the index of 'opcodes' inside the Instruction struct, will be set by sort_opcodes
-        self::sort_by_opcode(crate::util::expand_array(&[$(($instrs, 0)),*]))
-    }}
+/// Fetch an instruction using the given opcode, returns None if the opcode isnt supported
+#[inline]
+pub const fn decode(
+    opcode: u8,
+) -> Option<(
+    &'static Instruction,
+    &'static AdressingMode,
+    &'static CycleCount,
+)> {
+    // Because this is a const fn we cannot use the question mark operator or a more functional approach
+    if let Some((instr, op_idx)) = INSTRUCTIONS[opcode as usize] {
+        Some((
+            instr,
+            instr.opcodes[op_idx].mode,
+            instr.opcodes[op_idx].cycles,
+        ))
+    } else {
+        None
+    }
+}
+
+/// A collection of all instructions, indexable by opcode. The second element of the tuple is an index into 'Instruction.opcodes'
+type InstructionTable = [Option<(&'static Instruction, usize)>; INSTRUCTION_TABLE_LEN];
+const INSTRUCTION_TABLE_LEN: usize = 0x100;
+
+/// Sorts an InstructionTable so that it can be indexed by opcode
+const fn sort_by_opcode(input: InstructionTable) -> InstructionTable {
+    let mut output: InstructionTable = [None; INSTRUCTION_TABLE_LEN];
+    let mut idx = 0;
+    while idx < input.len() {
+        if let Some(instr) = input[idx] {
+            let mut op_idx = 0;
+            while op_idx < instr.0.opcodes.len() {
+                let opcode = *instr.0.opcodes[op_idx].code as usize;
+                // Check if the opcode is defined multiple times. Unfortunately we can't communicate which instructions
+                // contain a duplicate, as string formatting for the error message is not yet allowed in const fn's.
+                assert!(output[opcode].is_none());
+                output[opcode] = Some((instr.0, op_idx));
+                op_idx += 1;
+            }
+        }
+        idx += 1;
+    }
+    output
 }
 
 // Less verbose way to define an Instruction
@@ -616,10 +606,23 @@ macro_rules! instr {
     };
 }
 
+macro_rules! gen_instr_table {
+    ($($instrs: tt),*) => {{
+        // Note: the second tuple element is the index of 'Instruction.opcodes', will be set by sort_opcodes
+        self::sort_by_opcode(crate::util::expand_array(&[$(($instrs, 0)),*]))
+    }}
+}
+
 #[rustfmt::skip]
-pub const INSTRUCTIONS: InstructionArray = gen_instructions!(
+pub const INSTRUCTIONS: InstructionTable = gen_instr_table!(
     (instr!("BRK", true, instrs::brk, (0x00, 7, AdressingMode::Implied))),
     (instr!("RTI", true, instrs::rti, (0x40, 6, AdressingMode::Implied))),
+    (instr!("JSR", true, instrs::jsr, (0x20, 6, AdressingMode::Absolute))),
+    (instr!("RTS", true, instrs::rts, (0x60, 6, AdressingMode::Implied))),
+    (instr!("JMP", true, instrs::jmp,
+        (0x4C, 3, AdressingMode::Absolute),
+        (0x6C, 5, AdressingMode::Indirect)
+    )),
 
     (instr!("BCS", true, instrs::bcs, (0xB0, 2, AdressingMode::Relative))),
     (instr!("BCC", true, instrs::bcc, (0x90, 2, AdressingMode::Relative))),
@@ -642,20 +645,13 @@ pub const INSTRUCTIONS: InstructionArray = gen_instructions!(
     (instr!("TAY", instrs::tay, (0xA8, 2, AdressingMode::Implied))),
     (instr!("TXA", instrs::txa, (0x8A, 2, AdressingMode::Implied))),
     (instr!("TYA", instrs::tya, (0x98, 2, AdressingMode::Implied))),
+    (instr!("TSX", instrs::tsx, (0xBA, 2, AdressingMode::Implied))),
+    (instr!("TXS", instrs::txs, (0x9A, 2, AdressingMode::Implied))),
 
-    (instr!("JSR", true, instrs::jsr, (0x20, 6, AdressingMode::Absolute))),
-    (instr!("RTS", true, instrs::rts, (0x60, 6, AdressingMode::Implied))),
     (instr!("PHP", instrs::php, (0x08, 3, AdressingMode::Implied))),
     (instr!("PLP", instrs::plp, (0x28, 4, AdressingMode::Implied))),
     (instr!("PHA", instrs::pha, (0x48, 3, AdressingMode::Implied))),
     (instr!("PLA", instrs::pla, (0x68, 4, AdressingMode::Implied))),
-    (instr!("TSX", instrs::tsx, (0xBA, 2, AdressingMode::Implied))),
-    (instr!("TXS", instrs::txs, (0x9A, 2, AdressingMode::Implied))),
-
-    (instr!("JMP", true, instrs::jmp,
-        (0x4C, 3, AdressingMode::Absolute),
-        (0x6C, 5, AdressingMode::Indirect)
-    )),
 
     (instr!("NOP", instrs::nop,
         (0x80, 2, AdressingMode::Immediate),

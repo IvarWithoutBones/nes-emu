@@ -49,7 +49,7 @@ impl AdressingMode {
     pub fn fetch_param_address(&self, cpu: &mut Cpu) -> (u16, bool) {
         let after_opcode = cpu.program_counter.wrapping_add(1);
         match self {
-            Self::Immediate | Self::Relative => (after_opcode, false),
+            Self::Immediate => (after_opcode, false),
             Self::Absolute => (cpu.read_word(after_opcode), false),
             Self::ZeroPage => (cpu.read_byte(after_opcode) as u16, false),
 
@@ -73,6 +73,14 @@ impl AdressingMode {
                 let addr_base = cpu.read_word(after_opcode);
                 let addr = addr_base.wrapping_add(cpu.register_y as u16);
                 (addr, Cpu::is_on_different_page(addr_base, addr))
+            }
+
+            Self::Relative => {
+                let after_param = cpu.program_counter.wrapping_add(self.len());
+                // Convert to a signed integer to allow two's complement arithmetic
+                let offset = cpu.read_byte(after_opcode) as i8;
+                let addr = after_param.wrapping_add(offset as u16);
+                (addr, Cpu::is_on_different_page(after_opcode, addr))
             }
 
             Self::Indirect => {
@@ -112,7 +120,7 @@ impl AdressingMode {
             }
 
             _ => {
-                panic!("Addressing mode {} has no arguments!", self);
+                panic!("addressing mode {} has no arguments!", self);
             }
         }
     }
