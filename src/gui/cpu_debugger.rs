@@ -60,9 +60,47 @@ impl CpuDebugger {
     }
 
     pub fn clear_states(&mut self) {
-        // This isn't perfect, the MPSC channel might still be full of messages filling up the buffer again
         self.cpu_states.clear();
         self.selected_cpu_state_index = None;
+    }
+
+    fn send_step_state(&mut self) {
+        self.step_sender.send(self.step_state.clone()).unwrap();
+    }
+
+    pub fn pause(&mut self) {
+        self.step_state.paused = true;
+        self.send_step_state();
+    }
+
+    pub fn unpause(&mut self) {
+        self.step_state.paused = false;
+        self.send_step_state();
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.step_state.paused = !self.step_state.paused;
+        self.send_step_state();
+    }
+
+    pub fn step(&mut self) {
+        self.step_state.paused = true;
+        self.step_state.step = true;
+        self.send_step_state();
+    }
+
+    fn selected_or_last_cpu_state(&self) -> Option<&CpuState> {
+        if let Some(index) = self.selected_cpu_state_index {
+            self.cpu_states[index].as_ref()
+        } else {
+            self.cpu_states.last()
+        }
+    }
+
+    pub fn update_buffer(&mut self) {
+        while let Ok(state) = self.cpu_state_receiver.try_recv() {
+            self.cpu_states.push(state);
+        }
     }
 
     /// Returns a widget containing the CPU debugger, to be drawn with egui
@@ -86,31 +124,6 @@ impl CpuDebugger {
                 }
             })
             .response
-        }
-    }
-
-    fn selected_or_last_cpu_state(&self) -> Option<&CpuState> {
-        if let Some(index) = self.selected_cpu_state_index {
-            self.cpu_states[index].as_ref()
-        } else {
-            self.cpu_states.last()
-        }
-    }
-
-    pub fn toggle_pause(&mut self) {
-        self.step_state.paused = !self.step_state.paused;
-        self.step_sender.send(self.step_state.clone()).unwrap();
-    }
-
-    pub fn step(&mut self) {
-        self.step_state.paused = true;
-        self.step_state.step = true;
-        self.step_sender.send(self.step_state.clone()).unwrap();
-    }
-
-    pub fn update_buffer(&mut self) {
-        while let Ok(state) = self.cpu_state_receiver.try_recv() {
-            self.cpu_states.push(state);
         }
     }
 

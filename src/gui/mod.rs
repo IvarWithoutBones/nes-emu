@@ -82,6 +82,7 @@ impl Gui {
     }
 
     fn send_rom_path(&mut self, path: PathBuf) {
+        self.unload_rom(); // In case one is already loaded, does nothing otherwise
         tracing::info!("opening ROM file: {}", path.display());
         self.rom_sender.send(path).unwrap_or_else(|err| {
             tracing::error!("failed to send ROM path: {}", err);
@@ -117,11 +118,9 @@ impl Gui {
             ui.menu_button("File", |ui| {
                 let open_file = ui.button("Open").on_hover_text("Open a ROM file");
                 if open_file.clicked() {
-                    // Because the GUI freezes while the file dialog is open, we OEM if the user takes too long.
-                    // See the MPSC related note in `widget` for more details.
-                    self.unload_rom();
-
                     ui.close_menu();
+                    self.cpu_debugger.pause();
+
                     // TODO: use the async file dialog for WASI targets
                     if let Some(file) = rfd::FileDialog::new()
                         .add_filter("NES ROM", &["nes"])
@@ -129,6 +128,8 @@ impl Gui {
                     {
                         self.send_rom_path(file);
                     }
+
+                    self.cpu_debugger.unpause();
                 }
 
                 let close_file = ui.button("Close").on_hover_text("Close the current ROM");
