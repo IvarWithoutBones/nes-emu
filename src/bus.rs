@@ -61,6 +61,8 @@ pub struct Bus {
 }
 
 impl Bus {
+    const RESET_CYCLES: usize = 7;
+
     pub fn new(
         button_receiver: Receiver<controller::Buttons>,
         pixel_sender: Sender<Box<PixelBuffer>>,
@@ -80,13 +82,25 @@ impl Bus {
         }
     }
 
-    pub fn load_cartridge(&mut self, cartridge: Cartridge) {
-        let cart = Rc::new(RefCell::new(cartridge.into()));
-        self.mapper = Some(cart.clone());
-        self.ppu.load_mapper(cart);
+    pub fn reset(&mut self) {
+        self.ppu.reset();
+        self.cpu_ram = CpuRam::default();
+        self.cycles = Self::RESET_CYCLES;
+        self.time_since_last_frame = time::Instant::now();
     }
 
-    pub fn has_mapper(&mut self) -> bool {
+    pub fn load_cartridge(&mut self, cartridge: Cartridge) {
+        let mapper = Rc::new(RefCell::new(cartridge.into()));
+        self.mapper = Some(mapper.clone());
+        self.ppu.load_mapper(mapper);
+    }
+
+    pub fn unload_cartridge(&mut self) {
+        self.mapper = None;
+        self.ppu.unload_mapper();
+    }
+
+    pub fn has_cartridge(&mut self) -> bool {
         if let Ok(path) = self.rom_receiver.try_recv() {
             let cartridge = Cartridge::from(path);
             self.load_cartridge(cartridge);

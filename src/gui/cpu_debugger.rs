@@ -59,6 +59,12 @@ impl CpuDebugger {
         }
     }
 
+    pub fn clear_states(&mut self) {
+        // This isn't perfect, the MPSC channel might still be full of messages filling up the buffer again
+        self.cpu_states.clear();
+        self.selected_cpu_state_index = None;
+    }
+
     /// Returns a widget containing the CPU debugger, to be drawn with egui
     pub fn widget(&mut self) -> impl egui::Widget + '_ {
         move |ui: &mut egui::Ui| {

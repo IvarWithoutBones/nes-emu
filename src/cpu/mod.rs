@@ -76,7 +76,6 @@ pub struct Cpu {
 impl Cpu {
     const STACK_OFFSET: u16 = 0x0100;
     const STACK_RESET: u8 = 0xFD;
-    const RESET_CYCLES: usize = 7;
 
     const NMI_VECTOR: u16 = 0xFFFA;
     const RESET_VECTOR: u16 = 0xFFFC;
@@ -97,15 +96,15 @@ impl Cpu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn reset(&mut self) {
-        self.bus.cycles = Cpu::RESET_CYCLES;
+        tracing::info!("resetting");
+        self.bus.reset();
         self.flags = CpuFlags::default();
         self.stack_pointer = Cpu::STACK_RESET;
         self.accumulator = 0;
         self.register_x = 0;
         self.register_y = 0;
-
         self.program_counter = self.read_word(Cpu::RESET_VECTOR);
-        tracing::info!("resetting. PC={:04X}", self.program_counter);
+        tracing::info!("initialising, PC={:04X}", self.program_counter);
     }
 
     /// Check if two values are contained on a different page in memory

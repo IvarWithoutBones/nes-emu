@@ -32,7 +32,9 @@ pub struct Gui {
     cpu_debugger: CpuDebugger,
     current_view: View,
     input: Input,
+
     rom_sender: Sender<PathBuf>,
+    unload_rom_sender: Sender<()>,
 
     log_reload_handle: LogReloadHandle,
     log_level: LevelFilter,
@@ -46,7 +48,7 @@ impl Gui {
         step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
-        rom_sender: Sender<PathBuf>,
+        (rom_sender, unload_rom_sender): (Sender<PathBuf>, Sender<()>),
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
         let log_level = log_reload_handle
@@ -66,6 +68,7 @@ impl Gui {
         let emu = Self {
             span,
             rom_sender,
+            unload_rom_sender,
             screen: Screen::new(pixel_receiver),
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
             current_view: View::Screen,
@@ -83,6 +86,15 @@ impl Gui {
         self.rom_sender.send(path).unwrap_or_else(|err| {
             tracing::error!("failed to send ROM path: {}", err);
         });
+    }
+
+    fn unload_rom(&mut self) {
+        tracing::info!("closing ROM");
+        self.unload_rom_sender.send(()).unwrap_or_else(|err| {
+            tracing::error!("failed to send unload ROM signal: {err}");
+        });
+        self.cpu_debugger.update_buffer();
+        self.cpu_debugger.clear_states();
     }
 
     fn update_dropped_files(&mut self, ctx: &egui::Context) {
@@ -105,6 +117,10 @@ impl Gui {
             ui.menu_button("File", |ui| {
                 let open_file = ui.button("Open").on_hover_text("Open a ROM file");
                 if open_file.clicked() {
+                    // Because the GUI freezes while the file dialog is open, we OEM if the user takes too long.
+                    // See the MPSC related note in `widget` for more details.
+                    self.unload_rom();
+
                     ui.close_menu();
                     // TODO: use the async file dialog for WASI targets
                     if let Some(file) = rfd::FileDialog::new()
@@ -115,8 +131,15 @@ impl Gui {
                     }
                 }
 
+                let close_file = ui.button("Close").on_hover_text("Close the current ROM");
+                if close_file.clicked() {
+                    ui.close_menu();
+                    self.unload_rom();
+                }
+
                 let quit = ui.button("Quit").on_hover_text("Exit the application");
                 if quit.clicked() {
+                    ui.close_menu();
                     tracing::info!("quit button clicked, exiting");
                     std::process::exit(0);
                 };

@@ -69,9 +69,32 @@ impl Ppu {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.renderer.reset();
+
+        self.data_buffer = 0;
+        self.vram = [0; VIDEO_RAM_SIZE];
+        self.oam = ObjectAttributeMemory::default();
+
+        self.control = registers::Control::default();
+        self.mask = registers::Mask::default();
+        self.status = registers::Status::default();
+        self.scroll = registers::Scroll::default();
+        self.address = registers::Address::default();
+
+        self.cycles = 0;
+        self.scanline = 0;
+        self.trigger_nmi = false;
+    }
+
     pub fn load_mapper(&mut self, mapper: MapperInstance) {
         self.mapper = Some(mapper.clone());
         self.renderer.load_mapper(mapper);
+    }
+
+    pub fn unload_mapper(&mut self) {
+        self.mapper = None;
+        self.renderer.unload_mapper();
     }
 
     /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring

@@ -38,12 +38,14 @@ impl StepState {
 }
 
 pub struct CpuCommunication {
-    // TODO: switch to byte array receiver
-    rom_receiver: Receiver<PathBuf>,
     button_receiver: Receiver<controller::Buttons>,
     pixel_sender: ppu::PixelSender,
     cpu_state_sender: Option<Sender<cpu::CpuState>>,
     step_receiver: Option<Receiver<StepState>>,
+
+    // TODO: switch to byte array receiver
+    rom_receiver: Receiver<PathBuf>,
+    unload_rom_receiver: Receiver<()>,
 }
 
 impl CpuCommunication {
@@ -52,14 +54,24 @@ impl CpuCommunication {
             let bus = bus::Bus::new(self.button_receiver, self.pixel_sender, self.rom_receiver);
             let mut cpu = cpu::Cpu::new(bus);
             let mut step_state = StepState::default();
-
-            while !cpu.bus.has_mapper() {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
+            let mut inserted_cartridge = false;
 
             cpu.reset();
 
             loop {
+                if self.unload_rom_receiver.try_recv().is_ok() {
+                    inserted_cartridge = false;
+                    cpu.bus.unload_cartridge();
+                }
+
+                if !cpu.bus.has_cartridge() {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                } else if !inserted_cartridge {
+                    inserted_cartridge = true;
+                    cpu.reset();
+                }
+
                 if let Some(step_receiver) = self.step_receiver.as_ref() {
                     if let Ok(new_step_state) = step_receiver.try_recv() {
                         step_state = new_step_state;
@@ -96,10 +108,12 @@ impl CpuCommunication {
 pub struct UiCommunication {
     pub button_sender: Sender<controller::Buttons>,
     pub pixel_receiver: ppu::PixelReceiver,
-    pub rom_sender: Sender<PathBuf>,
     pub cpu_state_receiver: Option<Receiver<cpu::CpuState>>,
     pub step_sender: Option<Sender<StepState>>,
     pub log_reload_handle: LogReloadHandle,
+
+    pub rom_sender: Sender<PathBuf>,
+    pub unload_rom_sender: Sender<()>,
 }
 
 pub trait EmulatorUi {
@@ -111,6 +125,9 @@ pub fn init(
     log_reload_handle: LogReloadHandle,
 ) -> (CpuCommunication, UiCommunication) {
     let (rom_sender, rom_receiver) = channel();
+    let (unload_rom_sender, unload_rom_receiver) = channel();
+    let (pixel_sender, pixel_receiver) = channel();
+    let (button_sender, button_receiver) = channel();
 
     let (step_sender, step_receiver) = if with_gui {
         let (step_sender, step_receiver) = channel();
@@ -126,11 +143,9 @@ pub fn init(
         (None, None)
     };
 
-    let (pixel_sender, pixel_receiver) = channel();
-    let (button_sender, button_receiver) = channel();
-
     let cpu_comm = CpuCommunication {
         rom_receiver,
+        unload_rom_receiver,
         button_receiver,
         pixel_sender,
         cpu_state_sender,
@@ -138,12 +153,13 @@ pub fn init(
     };
 
     let ui_comm = UiCommunication {
-        log_reload_handle,
+        rom_sender,
+        unload_rom_sender,
         button_sender,
         pixel_receiver,
-        rom_sender,
         cpu_state_receiver,
         step_sender,
+        log_reload_handle,
     };
 
     (cpu_comm, ui_comm)

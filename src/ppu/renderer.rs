@@ -36,6 +36,17 @@ impl Renderer {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.pixels = Box::new([0; PIXEL_BUFFER_LEN]);
+        self.palette = Palette::default();
+        self.update(); // Clear the screen
+    }
+
+    pub fn unload_mapper(&mut self) {
+        self.mapper = None;
+        self.reset();
+    }
+
     pub fn load_mapper(&mut self, mapper: MapperInstance) {
         self.mapper = Some(mapper);
     }

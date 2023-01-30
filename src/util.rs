@@ -74,6 +74,11 @@ impl<T, const N: usize> CircularBuffer<T, N> {
         self.data[self.current.saturating_sub(1)].as_ref()
     }
 
+    pub fn clear(&mut self) {
+        self.data = [Self::DEFAULT; N];
+        self.current = 0;
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         let start = self.current;
         let end = self.current.wrapping_add(N);

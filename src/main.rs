@@ -61,7 +61,7 @@ impl EmulatorUi for Gui {
             ui.step_sender.unwrap(),
             ui.button_sender,
             ui.pixel_receiver,
-            ui.rom_sender,
+            (ui.rom_sender, ui.unload_rom_sender),
         );
     }
 }
