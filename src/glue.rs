@@ -42,6 +42,7 @@ pub struct CpuCommunication {
     pixel_sender: ppu::PixelSender,
     cpu_state_sender: Option<Sender<cpu::CpuState>>,
     step_receiver: Option<Receiver<StepState>>,
+    reboot_receiver: Option<Receiver<()>>,
 
     // TODO: switch to byte array receiver
     rom_receiver: Receiver<PathBuf>,
@@ -70,6 +71,12 @@ impl CpuCommunication {
                 } else if !inserted_cartridge {
                     inserted_cartridge = true;
                     cpu.reset();
+                }
+
+                if let Some(reboot_receiver) = self.reboot_receiver.as_ref() {
+                    if reboot_receiver.try_recv().is_ok() {
+                        cpu.reset();
+                    }
                 }
 
                 if let Some(step_receiver) = self.step_receiver.as_ref() {
@@ -109,8 +116,10 @@ pub struct UiCommunication {
     pub button_sender: Sender<controller::Buttons>,
     pub pixel_receiver: ppu::PixelReceiver,
     pub cpu_state_receiver: Option<Receiver<cpu::CpuState>>,
-    pub step_sender: Option<Sender<StepState>>,
     pub log_reload_handle: LogReloadHandle,
+
+    pub step_sender: Option<Sender<StepState>>,
+    pub reboot_sender: Option<Sender<()>>,
 
     pub rom_sender: Sender<PathBuf>,
     pub unload_rom_sender: Sender<()>,
@@ -136,6 +145,13 @@ pub fn init(
         (None, None)
     };
 
+    let (reboot_sender, reboot_receiver) = if with_gui {
+        let (step_sender, step_receiver) = channel();
+        (Some(step_sender), Some(step_receiver))
+    } else {
+        (None, None)
+    };
+
     let (cpu_state_sender, cpu_state_receiver) = if with_gui {
         let (cpu_state_sender, cpu_state_receiver) = channel();
         (Some(cpu_state_sender), Some(cpu_state_receiver))
@@ -150,6 +166,7 @@ pub fn init(
         pixel_sender,
         cpu_state_sender,
         step_receiver,
+        reboot_receiver,
     };
 
     let ui_comm = UiCommunication {
@@ -159,6 +176,7 @@ pub fn init(
         pixel_receiver,
         cpu_state_receiver,
         step_sender,
+        reboot_sender,
         log_reload_handle,
     };
 

@@ -35,6 +35,7 @@ pub struct Gui {
 
     rom_sender: Sender<PathBuf>,
     unload_rom_sender: Sender<()>,
+    reboot_sender: Sender<()>,
 
     log_reload_handle: LogReloadHandle,
     log_level: LevelFilter,
@@ -45,9 +46,9 @@ impl Gui {
         window_title: &str,
         log_reload_handle: LogReloadHandle,
         cpu_state_receiver: Receiver<CpuState>,
-        step_sender: Sender<StepState>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
+        (step_sender, reboot_sender): (Sender<StepState>, Sender<()>),
         (rom_sender, unload_rom_sender): (Sender<PathBuf>, Sender<()>),
     ) {
         let span = tracing::span!(tracing::Level::INFO, "gui");
@@ -65,9 +66,10 @@ impl Gui {
             ..Default::default()
         };
 
-        let emu = Self {
+        let gui = Self {
             span,
             rom_sender,
+            reboot_sender,
             unload_rom_sender,
             screen: Screen::new(pixel_receiver),
             cpu_debugger: CpuDebugger::new(cpu_state_receiver, step_sender),
@@ -78,7 +80,7 @@ impl Gui {
             log_level,
         };
 
-        eframe::run_native(window_title, options, Box::new(|_cc| Box::new(emu)));
+        eframe::run_native(window_title, options, Box::new(|_cc| Box::new(gui)));
     }
 
     fn send_rom_path(&mut self, path: PathBuf) {
@@ -144,6 +146,34 @@ impl Gui {
                     tracing::info!("quit button clicked, exiting");
                     std::process::exit(0);
                 };
+            });
+
+            ui.menu_button("Emulation", |ui| {
+                let reboot = ui.button("Reboot").on_hover_text("Reboot the emulator");
+                if reboot.clicked() {
+                    ui.close_menu();
+                    tracing::info!("reboot button clicked, restarting emulator");
+                    self.reboot_sender.send(()).unwrap_or_else(|err| {
+                        tracing::error!("failed to send reboot signal: {}", err);
+                    });
+                    self.cpu_debugger.unpause();
+                }
+
+                let pause = ui
+                    .button("Toggle Pause")
+                    .on_hover_text("Pause or unpause the emulator");
+                if pause.clicked() {
+                    ui.close_menu();
+                    self.cpu_debugger.toggle_pause();
+                }
+
+                let step = ui
+                    .button("Step")
+                    .on_hover_text("Step the emulator one instruction");
+                if step.clicked() {
+                    ui.close_menu();
+                    self.cpu_debugger.step();
+                }
             });
 
             ui.menu_button("Show", |ui| {

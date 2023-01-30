@@ -58,9 +58,9 @@ impl EmulatorUi for Gui {
             "NES emu",
             ui.log_reload_handle,
             ui.cpu_state_receiver.unwrap(),
-            ui.step_sender.unwrap(),
             ui.button_sender,
             ui.pixel_receiver,
+            (ui.step_sender.unwrap(), ui.reboot_sender.unwrap()),
             (ui.rom_sender, ui.unload_rom_sender),
         );
     }
