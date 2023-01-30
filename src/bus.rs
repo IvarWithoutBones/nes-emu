@@ -210,6 +210,7 @@ impl Clock for Bus {
         self.ppu.tick(cycles);
         let vblank_after = self.ppu.status.in_vblank();
 
+        // TODO: Would be nice to move this to ppu::tick()
         if !vblank_before && vblank_after {
             self.ppu.render();
 

@@ -120,25 +120,8 @@ impl Ppu {
         result
     }
 
-    #[tracing::instrument(skip(self), parent = &self.span)]
     pub fn render(&mut self) {
-        if self.mask.show_background() {
-            self.renderer.draw_background(
-                self.control.background_bank(),
-                self.control.nametable_start(),
-                &self.vram,
-                self.scroll.x,
-                self.scroll.y,
-            );
-        }
-
-        if self.mask.show_sprites() {
-            self.renderer
-                .draw_sprites(self.control.sprite_bank(), &self.oam);
-        }
-
-        self.renderer.update();
-        tracing::info!("rendering frame");
+        self.renderer.update()
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
@@ -269,7 +252,7 @@ impl Ppu {
         // TODO: This should check if a non-opaque BG pixel overlaps with a non-opaque sprite zero pixel,
         // instead of triggering on any sprite zero pixel.
         let obj = Object::from(&self.oam.memory[0..4]);
-        (obj.y == self.scanline as usize) && obj.x <= cycle && self.mask.show_sprites()
+        self.mask.show_sprites() && (obj.y + 5 == self.scanline as usize) && obj.x <= cycle
     }
 }
 
@@ -291,13 +274,31 @@ impl Clock for Ppu {
             self.cycles -= CYCLES_PER_SCANLINE;
             self.scanline += 1;
 
+            if self.scanline < VBLANK_SCANLINE && self.mask.show_background() {
+                self.renderer.draw_background_scanline(
+                    self.scanline.into(),
+                    self.control.background_bank(),
+                    self.control.nametable_start(),
+                    &self.vram,
+                    (self.scroll.x, self.scroll.y),
+                );
+            }
+
             if self.scanline == VBLANK_SCANLINE {
+                self.status.set_sprite_zero(false);
                 self.status.set_vblank();
+                tracing::debug!("entering vblank, status: {}", self.status);
+
                 if self.control.nmi_at_vblank() {
                     self.trigger_nmi = true;
                 }
-                self.status.set_sprite_zero(false);
-                tracing::debug!("entering vblank, status: {}", self.status);
+
+                if self.mask.show_sprites() {
+                    self.renderer
+                        .draw_sprites(self.control.sprite_bank(), &self.oam);
+                }
+
+                tracing::info!("rendering frame");
             }
 
             if self.scanline > SCANLINES_PER_FRAME {

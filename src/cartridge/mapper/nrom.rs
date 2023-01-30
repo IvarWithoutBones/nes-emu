@@ -38,7 +38,11 @@ impl Mapper for NROM {
         );
     }
 
-    fn write_cpu(&mut self, _address: u16, _value: u8) {
-        unreachable!("cartridge's program rom is read-only");
+    fn write_cpu(&mut self, address: u16, value: u8) {
+        tracing::error!(
+            "ignoring write to read-only program rom: ${:04X} = ${:02X}",
+            address,
+            value
+        );
     }
 }
