@@ -71,13 +71,13 @@ impl<T, const N: usize> CircularBuffer<T, N> {
 
     /// Get the last value pushed into the buffer.
     pub fn last(&self) -> Option<&T> {
-        self.data[self.current].as_ref()
+        self.data[self.current.saturating_sub(1)].as_ref()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         let start = self.current;
         let end = self.current.wrapping_add(N);
-        (start..end).map(move |i| self.data[i % N].as_ref().unwrap())
+        (start..end).filter_map(move |i| self.data[i % N].as_ref())
     }
 }
 
@@ -85,14 +85,12 @@ impl<T, const N: usize> Index<usize> for CircularBuffer<T, N> {
     type Output = Option<T>;
 
     fn index(&self, index: usize) -> &Self::Output {
-        assert!(index < N, "index out of bounds: {index} >= {N}");
-        &self.data[index % N]
+        &self.data[self.current.wrapping_add(index) % N]
     }
 }
 
 impl<T, const N: usize> IndexMut<usize> for CircularBuffer<T, N> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        assert!(index < N, "index out of bounds: {index} >= {N}");
-        &mut self.data[index % N]
+        &mut self.data[self.current.wrapping_add(index) % N]
     }
 }
