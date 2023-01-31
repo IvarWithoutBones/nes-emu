@@ -164,7 +164,7 @@ impl Renderer {
                     let pixel_x = (tile_x * 8) + x;
                     let pixel_y = (tile_y * 8) + y;
 
-                    if viewport.contains(&Point::new(pixel_x, pixel_y)) {
+                    if viewport.contains(pixel_x, pixel_y) {
                         renderer.set_pixel(
                             (pixel_x as isize + scroll_x) as usize,
                             (pixel_y as isize + scroll_y) as usize,
@@ -188,10 +188,7 @@ impl Renderer {
                 scanline,
                 bank,
                 first_nametable,
-                Rectangle::new(
-                    Point::new(scroll_x as usize, scroll_y as usize),
-                    Point::new(WIDTH, HEIGHT),
-                ),
+                Rectangle::new((scroll_x as usize, scroll_y as usize), (WIDTH, HEIGHT)),
                 -(scroll_x as isize),
                 -(scroll_y as isize),
             );
@@ -200,7 +197,7 @@ impl Renderer {
                 scanline,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(scroll_x.into(), HEIGHT)),
+                Rectangle::new((0, 0), (scroll_x.into(), HEIGHT)),
                 (WIDTH as isize) - (scroll_x as isize),
                 0,
             );
@@ -209,7 +206,7 @@ impl Renderer {
                 (scanline + scroll_y as usize) - HEIGHT,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(WIDTH, HEIGHT)),
+                Rectangle::new((0, 0), (WIDTH, HEIGHT)),
                 0,
                 (HEIGHT as u8 - scroll_y) as isize,
             );
@@ -218,7 +215,7 @@ impl Renderer {
                 scanline + scroll_y as usize,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(WIDTH, HEIGHT)),
+                Rectangle::new((0, 0), (WIDTH, HEIGHT)),
                 0,
                 -(scroll_y as isize),
             );
@@ -275,35 +272,30 @@ impl From<(usize, usize)> for Quadrant {
     }
 }
 
-// TODO: Should probably use generics for this
-struct Point {
-    x: usize,
-    y: usize,
-}
-
-impl Point {
-    const fn new(x: usize, y: usize) -> Self {
-        Self { x, y }
-    }
-}
-
 struct Rectangle {
-    top_left: Point,
-    bottom_right: Point,
+    top_left_x: usize,
+    top_left_y: usize,
+    bottom_right_x: usize,
+    bottom_right_y: usize,
 }
 
 impl Rectangle {
-    const fn new(top_left: Point, bottom_right: Point) -> Self {
+    const fn new(
+        (top_left_x, top_left_y): (usize, usize),
+        (bottom_right_x, bottom_right_y): (usize, usize),
+    ) -> Self {
         Self {
-            top_left,
-            bottom_right,
+            top_left_x,
+            top_left_y,
+            bottom_right_x,
+            bottom_right_y,
         }
     }
 
-    const fn contains(&self, point: &Point) -> bool {
-        point.x >= self.top_left.x
-            && point.x < self.bottom_right.x
-            && point.y >= self.top_left.y
-            && point.y < self.bottom_right.y
+    const fn contains(&self, x: usize, y: usize) -> bool {
+        x >= self.top_left_x
+            && x < self.bottom_right_x
+            && y >= self.top_left_y
+            && y < self.bottom_right_y
     }
 }
