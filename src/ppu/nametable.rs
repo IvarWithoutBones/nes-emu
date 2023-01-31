@@ -4,51 +4,58 @@ use {
     std::ops::{Index, Range},
 };
 
-const NAMETABLE_LEN: u16 = 0x400;
-const ATTRIBUTE_TABLE_LEN: u16 = 64;
+pub const NAMETABLE_LEN: usize = 0x400;
+const ATTRIBUTE_TABLE_LEN: usize = 64;
 
 #[repr(u16)]
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NametableAddr {
-    One = 0,
-    Two = 0x400,
-    Three = 0x800,
-    Four = 0xC00,
-}
-
-impl NametableAddr {
-    const VRAM_BASE: u16 = 0x2000;
-
-    /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-    pub fn mirror(addr: u16, mirroring: Mirroring) -> u16 {
-        let vram_index = {
-            let mirrored = addr & 0b10111111111111; // mirror down 0x3000-0x3eff to 0x2000 - 0x2eff
-            mirrored - Self::VRAM_BASE
-        };
-        let nametable = Self::from(vram_index / NAMETABLE_LEN);
-
-        match (mirroring, nametable) {
-            (Mirroring::Vertical, Self::Three)
-            | (Mirroring::Vertical, Self::Four)
-            | (Mirroring::Horizontal, Self::Four) => vram_index - Self::Three as u16,
-
-            (Mirroring::Horizontal, Self::Three) | (Mirroring::Horizontal, Self::Two) => {
-                vram_index - Self::Two as u16
-            }
-
-            _ => vram_index,
-        }
-    }
+    TopLeft = 0,
+    TopRight = 0x400,
+    BottomLeft = 0x800,
+    BottomRight = 0xC00,
 }
 
 impl From<u16> for NametableAddr {
     fn from(value: u16) -> Self {
         match value {
-            0 => Self::One,
-            1 => Self::Two,
-            2 => Self::Three,
-            3 => Self::Four,
+            0 => Self::TopLeft,
+            1 => Self::TopRight,
+            2 => Self::BottomLeft,
+            3 => Self::BottomRight,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl NametableAddr {
+    const VRAM_BASE: u16 = 0x2000;
+
+    pub fn mirror_vram_index(mut addr: u16, mirroring: Mirroring) -> u16 {
+        addr -= Self::VRAM_BASE;
+        let nametable = Self::from(addr / NAMETABLE_LEN as u16);
+        (nametable.mirror(mirroring) as u16) + (addr % NAMETABLE_LEN as u16)
+    }
+
+    /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
+    /// Only two nametables are stored in VRAM, the other two are mirrored.
+    /// This function normalizes the address to a location in VRAM
+    fn mirror(self, mirroring: Mirroring) -> Self {
+        match (mirroring, &self) {
+            (Mirroring::Vertical, Self::TopLeft)
+            | (Mirroring::Vertical, Self::BottomLeft)
+            | (Mirroring::Horizontal, Self::TopLeft)
+            | (Mirroring::Horizontal, Self::TopRight) => Self::TopLeft,
+
+            (Mirroring::Vertical, NametableAddr::TopRight)
+            | (Mirroring::Vertical, NametableAddr::BottomRight)
+            | (Mirroring::Horizontal, NametableAddr::BottomLeft)
+            | (Mirroring::Horizontal, NametableAddr::BottomRight) => Self::TopRight,
+
+            _ => {
+                let address = self as u16;
+                panic!("unsupported mirroring {mirroring} for nametable {address:04X}")
+            }
         }
     }
 }
@@ -57,31 +64,21 @@ pub struct Nametable<'a>(&'a [u8]);
 
 impl<'a> Nametable<'a> {
     pub fn from(vram: &'a VideoRam, address: NametableAddr, mirroring: Mirroring) -> (Self, Self) {
-        let first = Self(&vram[NametableAddr::One as usize..NametableAddr::Two as usize]);
-        let second = Self(&vram[NametableAddr::Two as usize..NametableAddr::Three as usize]);
+        let first = Self(&vram[NametableAddr::TopLeft as usize..NametableAddr::TopRight as usize]);
+        let second =
+            Self(&vram[NametableAddr::TopRight as usize..NametableAddr::BottomLeft as usize]);
 
-        // TODO: use NametableAddr::mirror?
-        match (mirroring, address.clone()) {
-            (Mirroring::Vertical, NametableAddr::One)
-            | (Mirroring::Vertical, NametableAddr::Three)
-            | (Mirroring::Horizontal, NametableAddr::One)
-            | (Mirroring::Horizontal, NametableAddr::Two) => (first, second),
-
-            (Mirroring::Vertical, NametableAddr::Two)
-            | (Mirroring::Vertical, NametableAddr::Four)
-            | (Mirroring::Horizontal, NametableAddr::Three)
-            | (Mirroring::Horizontal, NametableAddr::Four) => (second, first),
-
-            _ => {
-                let address = address as u16;
-                panic!("unsupported mirroring {mirroring} for nametable {address:04X}")
-            }
+        // The mirrored address gives us the first nametable, so we can swap them if needed.
+        if address.mirror(mirroring) == NametableAddr::TopLeft {
+            (first, second)
+        } else {
+            (second, first)
         }
     }
 
     pub fn get_attribute(&self, index: usize) -> u8 {
         // TODO: move more of the logic into this method
-        self.0[(NAMETABLE_LEN - ATTRIBUTE_TABLE_LEN) as usize + index]
+        self.0[(NAMETABLE_LEN - ATTRIBUTE_TABLE_LEN) + index]
     }
 }
 

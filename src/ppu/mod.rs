@@ -6,7 +6,7 @@ pub mod renderer;
 
 use {
     self::{
-        nametable::{Nametable, NametableAddr},
+        nametable::{Nametable, NametableAddr, NAMETABLE_LEN},
         object_attribute::{Object, ObjectAttributeMemory},
         registers::Register,
         renderer::{PixelBuffer, Renderer},
@@ -24,8 +24,8 @@ use {
 pub type PixelReceiver = Receiver<Box<PixelBuffer>>;
 pub type PixelSender = Sender<Box<PixelBuffer>>;
 
-const VIDEO_RAM_SIZE: usize = 0x800;
-pub type VideoRam = [u8; VIDEO_RAM_SIZE];
+const VIDEO_RAM_SIZE: usize = NAMETABLE_LEN * 2;
+type VideoRam = [u8; VIDEO_RAM_SIZE];
 
 type ScanlineCount = u16;
 
@@ -109,8 +109,8 @@ impl Ppu {
         self.renderer.update()
     }
 
-    fn mirror_nametable(&self, addr: u16) -> u16 {
-        NametableAddr::mirror(addr, self.mapper.as_ref().unwrap().borrow().mirroring())
+    fn to_nametable_index(&self, addr: u16) -> u16 {
+        NametableAddr::mirror_vram_index(addr, self.mapper.as_ref().unwrap().borrow().mirroring())
     }
 
     fn update_data_buffer(&mut self, value: u8) -> u8 {
@@ -162,7 +162,7 @@ impl Ppu {
             tracing::debug!("pattern table read at ${:04X}: ${:02X}", addr, result);
             self.update_data_buffer(result)
         } else if Self::NAMETABLE_RANGE.contains(&addr) {
-            let result = self.vram[self.mirror_nametable(addr) as usize];
+            let result = self.vram[self.to_nametable_index(addr) as usize];
             tracing::debug!("nametable read at ${:04X}: ${:02X}", addr, result);
             self.update_data_buffer(result)
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {
@@ -182,7 +182,7 @@ impl Ppu {
         let addr = self.address.value;
 
         if Self::NAMETABLE_RANGE.contains(&addr) {
-            let vram_index = self.mirror_nametable(addr) as usize;
+            let vram_index = self.to_nametable_index(addr) as usize;
             self.vram[vram_index] = data;
             tracing::debug!("nametable write at ${:04X}: ${:02X}", vram_index, data);
         } else if Self::PALETTE_RAM_RANGE.contains(&addr) {

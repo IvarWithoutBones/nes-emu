@@ -211,7 +211,7 @@ impl Renderer {
                 second_nametable,
                 Rectangle::new(Point::new(0, 0), Point::new(WIDTH, HEIGHT)),
                 0,
-                (239 - scroll_y) as isize,
+                (HEIGHT as u8 - scroll_y) as isize,
             );
         } else {
             self.draw_nametable_scanline(
