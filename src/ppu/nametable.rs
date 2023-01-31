@@ -1,11 +1,16 @@
 use {
-    super::VideoRam,
+    super::{renderer::PIXELS_PER_TILE, VideoRam},
     crate::cartridge::Mirroring,
     std::ops::{Index, Range},
 };
 
-pub const NAMETABLE_LEN: usize = 0x400;
+pub const TILES_PER_ROW: usize = 32;
+pub const TILES_PER_COLUMN: usize = 30;
+
 const ATTRIBUTE_TABLE_LEN: usize = 64;
+const TILE_TABLE_LEN: usize = TILES_PER_COLUMN * TILES_PER_ROW;
+
+pub const NAMETABLE_LEN: usize = TILE_TABLE_LEN + ATTRIBUTE_TABLE_LEN;
 
 #[repr(u16)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +73,7 @@ impl<'a> Nametable<'a> {
         let second =
             Self(&vram[NametableAddr::TopRight as usize..NametableAddr::BottomLeft as usize]);
 
-        // The mirrored address gives us the first nametable, so we can swap them if needed.
+        // The mirrored address gives us the first nametable in VRAM, swap them if needed
         if address.mirror(mirroring) == NametableAddr::TopLeft {
             (first, second)
         } else {
@@ -76,9 +81,18 @@ impl<'a> Nametable<'a> {
         }
     }
 
-    pub fn get_attribute(&self, index: usize) -> u8 {
-        // TODO: move more of the logic into this method
-        self.0[(NAMETABLE_LEN - ATTRIBUTE_TABLE_LEN) + index]
+    pub fn get_tile_index(&self, x: usize, y: usize) -> u8 {
+        self[(y * TILES_PER_ROW) + x]
+    }
+
+    pub fn get_palette_index(&self, x: usize, y: usize) -> u8 {
+        let attr = {
+            let coarse_x = x / 4;
+            let coarse_y = y / 4;
+            let index = (coarse_y * PIXELS_PER_TILE) + coarse_x;
+            self[TILE_TABLE_LEN + index]
+        };
+        Quadrant::from(x, y).into_palette_index(attr)
     }
 }
 
@@ -95,5 +109,35 @@ impl Index<Range<usize>> for Nametable<'_> {
 
     fn index(&self, index: Range<usize>) -> &Self::Output {
         &self.0[index]
+    }
+}
+
+/// https://www.nesdev.org/wiki/PPU_attribute_tables
+#[repr(u8)]
+#[derive(Debug)]
+enum Quadrant {
+    TopLeft = 0,
+    TopRight = 2,
+    BottomLeft = 4,
+    BottomRight = 6,
+}
+
+impl Quadrant {
+    const fn from(mut x: usize, mut y: usize) -> Self {
+        // Normalize to a 2x2 grid
+        x = (x % 4) / 2;
+        y = (y % 4) / 2;
+
+        match (x, y) {
+            (0, 0) => Quadrant::TopLeft,
+            (1, 0) => Quadrant::TopRight,
+            (0, 1) => Quadrant::BottomLeft,
+            (1, 1) => Quadrant::BottomRight,
+            (_, _) => unreachable!(),
+        }
+    }
+
+    const fn into_palette_index(self, value: u8) -> u8 {
+        (value >> self as u8) & 0b11
     }
 }

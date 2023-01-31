@@ -1,6 +1,6 @@
 use {
     super::{
-        nametable::Nametable,
+        nametable::{Nametable, TILES_PER_ROW},
         object_attribute::ObjectAttributeMemory,
         palette::{Color, Palette, PaletteEntry, PALETTE_TABLE},
     },
@@ -10,16 +10,16 @@ use {
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
-const RGB_LEN: usize = 3;
 
+const RGB_LEN: usize = 3;
 const PIXEL_BUFFER_LEN: usize = (WIDTH * HEIGHT) * RGB_LEN;
 pub type PixelBuffer = [u8; PIXEL_BUFFER_LEN];
 
 const TILE_LEN: usize = 16;
 type TileData = [u8; TILE_LEN];
+pub const PIXELS_PER_TILE: usize = 8;
 
 const BETWEEN_PLANES: usize = 8;
-const PIXELS_PER_ROW: usize = 8;
 
 pub struct Renderer {
     pixel_sender: Sender<Box<PixelBuffer>>,
@@ -84,30 +84,15 @@ impl Renderer {
             .unwrap()
     }
 
-    fn for_pixel_in_tile<T>(&mut self, tile: &TileData, palette_entry: PaletteEntry, draw_fn: T)
-    where
-        T: Fn(&mut Self, usize, usize, Color),
-    {
-        for y in 0..PIXELS_PER_ROW {
-            let lower_plane = tile[y];
-            let upper_plane = tile[y + BETWEEN_PLANES];
-            self.draw_line(
-                (lower_plane, upper_plane),
-                palette_entry,
-                |renderer, x, color| draw_fn(renderer, x, y, color),
-            );
-        }
-    }
-
-    fn draw_line<T>(
+    fn for_pixels_in_line<T>(
         &mut self,
-        (mut lower_plane, mut upper_plane): (u8, u8),
+        (mut upper_plane, mut lower_plane): (u8, u8),
         palette_entry: PaletteEntry,
         draw_fn: T,
     ) where
         T: Fn(&mut Self, usize, Color),
     {
-        for x in (0..PIXELS_PER_ROW).rev() {
+        for x in (0..PIXELS_PER_TILE).rev() {
             let color = {
                 let index = util::combine_bools(
                     util::nth_bit(upper_plane, 0),
@@ -115,6 +100,7 @@ impl Renderer {
                 );
                 Palette::get(palette_entry, index.into())
             };
+
             draw_fn(self, x, color);
 
             upper_plane >>= 1;
@@ -122,47 +108,53 @@ impl Renderer {
         }
     }
 
-    fn draw_nametable_scanline(
+    fn for_pixels_in_tile<T>(&mut self, tile: &TileData, palette_entry: PaletteEntry, draw_fn: T)
+    where
+        T: Fn(&mut Self, usize, usize, Color),
+    {
+        for y in 0..PIXELS_PER_TILE {
+            let upper_plane = tile[y + BETWEEN_PLANES];
+            let lower_plane = tile[y];
+            self.for_pixels_in_line(
+                (upper_plane, lower_plane),
+                palette_entry,
+                |renderer, x, color| draw_fn(renderer, x, y, color),
+            );
+        }
+    }
+
+    fn draw_background_scanline(
         &mut self,
         scanline: usize,
         bank: usize,
         nametable: &Nametable,
         viewport: Rectangle,
-        scroll_x: isize,
-        scroll_y: isize,
+        (scroll_x, scroll_y): (isize, isize),
     ) {
-        const TILES_WIDTH: usize = 32;
+        // Position within the tile
+        let y_offset = scanline % PIXELS_PER_TILE;
 
-        let y = scanline % 8;
-        let tile_y = scanline / 8;
-
-        for tile_x in 0..TILES_WIDTH {
-            let tile_idx = nametable[(tile_y * TILES_WIDTH) + tile_x] as u16;
-            let tile = self.get_tile(bank, tile_idx as usize);
-
-            let palette = {
-                // The attribute table is an 8x8 byte array containing palette table indices.
-                // Each byte represents a 2x2 tile area in the nametable.
-                let quad = Quadrant::from((tile_x, tile_y));
-                let attr = {
-                    let attr_index = {
-                        let x = tile_x / 4;
-                        let y = tile_y / 4;
-                        (y * 8) + x
-                    };
-                    nametable.get_attribute(attr_index)
-                };
-
-                let palette_index = (attr >> quad as u8) & 0b11;
-                self.palette.background_entry(palette_index as usize)
+        // Loop over each tile in the scanline
+        let tile_y = scanline / PIXELS_PER_TILE;
+        for tile_x in 0..TILES_PER_ROW {
+            let tile = {
+                let index = nametable.get_tile_index(tile_x, tile_y);
+                self.get_tile(bank, index as usize)
             };
 
-            self.draw_line(
-                (tile[y], tile[y + BETWEEN_PLANES]),
+            let palette = {
+                let index = nametable.get_palette_index(tile_x, tile_y);
+                self.palette.background_entry(index as usize)
+            };
+
+            let upper_plane = tile[y_offset + BETWEEN_PLANES];
+            let lower_plane = tile[y_offset];
+            self.for_pixels_in_line(
+                (upper_plane, lower_plane),
                 palette,
-                |renderer, x, color| {
-                    let pixel_x = (tile_x * 8) + x;
-                    let pixel_y = (tile_y * 8) + y;
+                |renderer, x_offset, color| {
+                    let pixel_x = (tile_x * PIXELS_PER_TILE) + x_offset;
+                    let pixel_y = (tile_y * PIXELS_PER_TILE) + y_offset;
 
                     if viewport.contains(pixel_x, pixel_y) {
                         renderer.set_pixel(
@@ -176,7 +168,25 @@ impl Renderer {
         }
     }
 
-    pub fn draw_background_scanline(
+    pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
+        for object in oam.iter() {
+            // TODO: Apply sprite priority properly
+            let tile = self.get_tile(bank, object.tile_index);
+            let palette = self.palette.sprite_entry(object.palette_index);
+
+            self.for_pixels_in_tile(&tile, palette, |renderer, x, y, color| {
+                if color == PALETTE_TABLE[0] {
+                    // Transparant
+                    return;
+                }
+
+                let (x, y) = object.pixel_position(x, y);
+                renderer.set_pixel(x, y, color);
+            });
+        }
+    }
+
+    pub fn draw_scanline(
         &mut self,
         scanline: usize,
         bank: usize,
@@ -184,90 +194,37 @@ impl Renderer {
         (scroll_x, scroll_y): (u8, u8),
     ) {
         if scroll_y == 0 {
-            self.draw_nametable_scanline(
+            self.draw_background_scanline(
                 scanline,
                 bank,
                 first_nametable,
                 Rectangle::new((scroll_x as usize, scroll_y as usize), (WIDTH, HEIGHT)),
-                -(scroll_x as isize),
-                -(scroll_y as isize),
+                (-(scroll_x as isize), -(scroll_y as isize)),
             );
 
-            self.draw_nametable_scanline(
+            self.draw_background_scanline(
                 scanline,
                 bank,
                 second_nametable,
                 Rectangle::new((0, 0), (scroll_x.into(), HEIGHT)),
-                (WIDTH as isize) - (scroll_x as isize),
-                0,
+                ((WIDTH as isize) - (scroll_x as isize), 0),
             );
         } else if (scanline + scroll_y as usize) > HEIGHT {
-            self.draw_nametable_scanline(
+            self.draw_background_scanline(
                 (scanline + scroll_y as usize) - HEIGHT,
                 bank,
                 second_nametable,
                 Rectangle::new((0, 0), (WIDTH, HEIGHT)),
-                0,
-                (HEIGHT as u8 - scroll_y) as isize,
+                (0, (HEIGHT as u8 - scroll_y) as isize),
             );
         } else {
-            self.draw_nametable_scanline(
+            self.draw_background_scanline(
                 scanline + scroll_y as usize,
                 bank,
                 second_nametable,
                 Rectangle::new((0, 0), (WIDTH, HEIGHT)),
-                0,
-                -(scroll_y as isize),
+                (0, -(scroll_y as isize)),
             );
-        }
-    }
-
-    pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
-        for object in oam.iter() {
-            // TODO: Apply sprite priority properly
-            let tile = self.get_tile(bank, object.tile_index);
-            let palette = self.palette.sprite_entry(object.palette_index);
-
-            self.for_pixel_in_tile(&tile, palette, |renderer, x, y, color| {
-                if color == PALETTE_TABLE[0] {
-                    // Transparant
-                    return;
-                }
-
-                match (object.flip_horizontal, object.flip_vertical) {
-                    (false, false) => renderer.set_pixel(object.x + x, object.y + y, color),
-                    (true, false) => renderer.set_pixel((object.x + 7) - x, object.y + y, color),
-                    (false, true) => renderer.set_pixel(object.x + x, (object.y + 7) - y, color),
-                    (true, true) => {
-                        renderer.set_pixel((object.x + 7) - x, (object.y + 7) - y, color)
-                    }
-                }
-            });
-        }
-    }
-}
-
-/// https://www.nesdev.org/wiki/PPU_attribute_tables
-#[repr(u8)]
-enum Quadrant {
-    TopLeft = 0,
-    TopRight = 2,
-    BottomLeft = 4,
-    BottomRight = 6,
-}
-
-impl From<(usize, usize)> for Quadrant {
-    fn from(mut location: (usize, usize)) -> Self {
-        // Normalize the location to an 8x8 grid
-        location.0 = (location.0 % 4) / 2;
-        location.1 = (location.1 % 4) / 2;
-
-        match location {
-            (0, 0) => Quadrant::TopLeft,
-            (1, 0) => Quadrant::TopRight,
-            (0, 1) => Quadrant::BottomLeft,
-            (1, 1) => Quadrant::BottomRight,
-            (_, _) => unreachable!(),
         }
     }
 }

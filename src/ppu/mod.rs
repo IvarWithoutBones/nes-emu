@@ -273,7 +273,7 @@ impl Clock for Ppu {
                 let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
                 let (first_nametable, second_nametable) =
                     Nametable::from(&self.vram, self.control.nametable_start(), mirroring);
-                self.renderer.draw_background_scanline(
+                self.renderer.draw_scanline(
                     self.scanline.into(),
                     self.control.background_bank(),
                     (&first_nametable, &second_nametable),

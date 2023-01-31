@@ -1,6 +1,9 @@
-use crate::util;
-use bitflags::bitflags;
-use std::ops::{Index, Range};
+use {
+    super::renderer::PIXELS_PER_TILE,
+    crate::util,
+    bitflags::bitflags,
+    std::ops::{Index, Range},
+};
 
 /// https://www.nesdev.org/wiki/PPU_OAM
 pub struct ObjectAttributeMemory {
@@ -35,7 +38,6 @@ impl ObjectAttributeMemory {
     #[tracing::instrument(skip(self, addr), parent = &self.span)]
     pub fn dma(&self, addr: u8) -> Range<usize> {
         // Convert to a page index: $XX -> $XX00
-        tracing::debug!("DMA write of ${:02X}", addr);
         let begin = ((addr as u16) << 8) as usize;
         let end = begin + Self::MEMORY_SIZE;
         tracing::debug!(
@@ -130,6 +132,26 @@ impl From<&[u8]> for Object {
             palette_index,
             tile_index,
         }
+    }
+}
+
+impl Object {
+    pub const fn pixel_position(&self, x: usize, y: usize) -> (usize, usize) {
+        const LEN: usize = PIXELS_PER_TILE - 1;
+
+        let x = if self.flip_horizontal {
+            (self.x + LEN) - x
+        } else {
+            self.x + x
+        };
+
+        let y = if self.flip_vertical {
+            (self.y + LEN) - y
+        } else {
+            self.y + y
+        };
+
+        (x, y)
     }
 }
 
