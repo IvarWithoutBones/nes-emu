@@ -1,8 +1,10 @@
 mod mapper;
 
-use bitflags::bitflags;
 pub use mapper::MapperInstance;
-use std::{fmt, path::PathBuf};
+use {
+    bitflags::bitflags,
+    std::{fmt, path::PathBuf},
+};
 
 // TODO: Nicer page abstraction
 pub const PROGRAM_ROM_START: u16 = 0x8000;

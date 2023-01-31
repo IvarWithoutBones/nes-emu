@@ -1,5 +1,7 @@
-use crate::util;
-use bitflags::bitflags;
+use {
+    crate::{ppu::nametable::NametableAddr, util},
+    bitflags::bitflags,
+};
 
 bitflags! {
     /*
@@ -74,18 +76,11 @@ impl Control {
         }
     }
 
-    pub fn nametable_start(&self) -> usize {
+    pub fn nametable_start(&self) -> NametableAddr {
         let value = util::combine_bools(
             self.contains(Self::NametableHigh),
             self.contains(Self::NametableLow),
         );
-
-        match value {
-            0 => 0x2000,
-            1 => 0x2400,
-            2 => 0x2800,
-            3 => 0x2C00,
-            _ => unreachable!(),
-        }
+        NametableAddr::from(value as u16)
     }
 }

@@ -1,16 +1,24 @@
+pub mod nametable;
 mod object_attribute;
 mod palette;
 pub mod registers;
 pub mod renderer;
 
-use super::bus::{Clock, CycleCount};
-use crate::cartridge::{MapperInstance, Mirroring};
-use object_attribute::{Object, ObjectAttributeMemory};
-use registers::Register;
-use renderer::{PixelBuffer, Renderer};
-use std::{
-    ops::RangeInclusive,
-    sync::mpsc::{Receiver, Sender},
+use {
+    self::{
+        nametable::{Nametable, NametableAddr},
+        object_attribute::{Object, ObjectAttributeMemory},
+        registers::Register,
+        renderer::{PixelBuffer, Renderer},
+    },
+    crate::{
+        bus::{Clock, CycleCount},
+        cartridge::MapperInstance,
+    },
+    std::{
+        ops::RangeInclusive,
+        sync::mpsc::{Receiver, Sender},
+    },
 };
 
 pub type PixelReceiver = Receiver<Box<PixelBuffer>>;
@@ -97,31 +105,18 @@ impl Ppu {
         self.renderer.unload_mapper();
     }
 
-    /// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-    fn mirror_nametable(&self, addr: u16) -> u16 {
-        let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
+    pub fn render(&mut self) {
+        self.renderer.update()
+    }
 
-        // TODO: no idea how this works
-        let mirrored_vram = addr & 0b10111111111111; // mirror down 0x3000-0x3eff to 0x2000 - 0x2eff
-        let vram_index = mirrored_vram - 0x2000; // to vram vector
-        let name_table = vram_index / 0x400; // to the name table index
-        match (mirroring, name_table) {
-            (Mirroring::Vertical, 2) | (Mirroring::Vertical, 3) => vram_index - 0x800,
-            (Mirroring::Horizontal, 2) => vram_index - 0x400,
-            (Mirroring::Horizontal, 1) => vram_index - 0x400,
-            (Mirroring::Horizontal, 3) => vram_index - 0x800,
-            _ => vram_index,
-        }
+    fn mirror_nametable(&self, addr: u16) -> u16 {
+        NametableAddr::mirror(addr, self.mapper.as_ref().unwrap().borrow().mirroring())
     }
 
     fn update_data_buffer(&mut self, value: u8) -> u8 {
         let result = self.data_buffer;
         self.data_buffer = value;
         result
-    }
-
-    pub fn render(&mut self) {
-        self.renderer.update()
     }
 
     #[tracing::instrument(skip(self), parent = &self.span)]
@@ -275,11 +270,13 @@ impl Clock for Ppu {
             self.scanline += 1;
 
             if self.scanline < VBLANK_SCANLINE && self.mask.show_background() {
+                let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
+                let (first_nametable, second_nametable) =
+                    Nametable::from(&self.vram, self.control.nametable_start(), mirroring);
                 self.renderer.draw_background_scanline(
                     self.scanline.into(),
                     self.control.background_bank(),
-                    self.control.nametable_start(),
-                    &self.vram,
+                    (&first_nametable, &second_nametable),
                     (self.scroll.x, self.scroll.y),
                 );
             }

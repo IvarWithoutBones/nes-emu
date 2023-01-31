@@ -1,13 +1,10 @@
 use {
     super::{
+        nametable::Nametable,
         object_attribute::ObjectAttributeMemory,
         palette::{Color, Palette, PaletteEntry, PALETTE_TABLE},
-        VideoRam,
     },
-    crate::{
-        cartridge::{MapperInstance, Mirroring},
-        util,
-    },
+    crate::{cartridge::MapperInstance, util},
     std::sync::mpsc::Sender,
 };
 
@@ -20,6 +17,9 @@ pub type PixelBuffer = [u8; PIXEL_BUFFER_LEN];
 
 const TILE_LEN: usize = 16;
 type TileData = [u8; TILE_LEN];
+
+const BETWEEN_PLANES: usize = 8;
+const PIXELS_PER_ROW: usize = 8;
 
 pub struct Renderer {
     pixel_sender: Sender<Box<PixelBuffer>>,
@@ -88,9 +88,6 @@ impl Renderer {
     where
         T: Fn(&mut Self, usize, usize, Color),
     {
-        const BETWEEN_PLANES: usize = 8;
-        const PIXELS_PER_ROW: usize = 8;
-
         for y in 0..PIXELS_PER_ROW {
             let lower_plane = tile[y];
             let upper_plane = tile[y + BETWEEN_PLANES];
@@ -110,7 +107,7 @@ impl Renderer {
     ) where
         T: Fn(&mut Self, usize, Color),
     {
-        for x in (0..8).rev() {
+        for x in (0..PIXELS_PER_ROW).rev() {
             let color = {
                 let index = util::combine_bools(
                     util::nth_bit(upper_plane, 0),
@@ -129,18 +126,12 @@ impl Renderer {
         &mut self,
         scanline: usize,
         bank: usize,
-        nametable: &[u8],
+        nametable: &Nametable,
         viewport: Rectangle,
         scroll_x: isize,
         scroll_y: isize,
     ) {
         const TILES_WIDTH: usize = 32;
-        const TILES_HEIGHT: usize = 30;
-        const ATTRIBUTE_TABLE_LEN: usize = 64;
-        const NAMETABLE_END: usize = TILES_WIDTH * TILES_HEIGHT;
-        const ATTRIBUTE_TABLE_END: usize = NAMETABLE_END + ATTRIBUTE_TABLE_LEN;
-
-        let attribute_table = &nametable[NAMETABLE_END..ATTRIBUTE_TABLE_END];
 
         let y = scanline % 8;
         let tile_y = scanline / 8;
@@ -159,25 +150,29 @@ impl Renderer {
                         let y = tile_y / 4;
                         (y * 8) + x
                     };
-                    attribute_table[attr_index]
+                    nametable.get_attribute(attr_index)
                 };
 
                 let palette_index = (attr >> quad as u8) & 0b11;
                 self.palette.background_entry(palette_index as usize)
             };
 
-            self.draw_line((tile[y], tile[y + 8]), palette, |renderer, x, color| {
-                let pixel_x = tile_x * 8 + x;
-                let pixel_y = tile_y * 8 + y;
+            self.draw_line(
+                (tile[y], tile[y + BETWEEN_PLANES]),
+                palette,
+                |renderer, x, color| {
+                    let pixel_x = (tile_x * 8) + x;
+                    let pixel_y = (tile_y * 8) + y;
 
-                if viewport.contains(&Point::new(pixel_x, pixel_y)) {
-                    renderer.set_pixel(
-                        (pixel_x as isize + scroll_x) as usize,
-                        (pixel_y as isize + scroll_y) as usize,
-                        color,
-                    );
-                }
-            });
+                    if viewport.contains(&Point::new(pixel_x, pixel_y)) {
+                        renderer.set_pixel(
+                            (pixel_x as isize + scroll_x) as usize,
+                            (pixel_y as isize + scroll_y) as usize,
+                            color,
+                        );
+                    }
+                },
+            );
         }
     }
 
@@ -185,25 +180,9 @@ impl Renderer {
         &mut self,
         scanline: usize,
         bank: usize,
-        nametable_addr: usize,
-        vram: &VideoRam,
+        (first_nametable, second_nametable): (&Nametable, &Nametable),
         (scroll_x, scroll_y): (u8, u8),
     ) {
-        let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
-        let (first_nametable, second_nametable) = match (&mirroring, nametable_addr) {
-            (Mirroring::Vertical, 0x2000)
-            | (Mirroring::Vertical, 0x2800)
-            | (Mirroring::Horizontal, 0x2000)
-            | (Mirroring::Horizontal, 0x2400) => (&vram[0..0x400], &vram[0x400..0x800]),
-
-            (Mirroring::Vertical, 0x2400)
-            | (Mirroring::Vertical, 0x2C00)
-            | (Mirroring::Horizontal, 0x2800)
-            | (Mirroring::Horizontal, 0x2C00) => (&vram[0x400..0x800], &vram[0..0x400]),
-
-            _ => panic!("unimplemented mirroring mode ({mirroring}, ${nametable_addr:04X})"),
-        };
-
         if scroll_y == 0 {
             self.draw_nametable_scanline(
                 scanline,
@@ -211,7 +190,7 @@ impl Renderer {
                 first_nametable,
                 Rectangle::new(
                     Point::new(scroll_x as usize, scroll_y as usize),
-                    Point::new(256, 240),
+                    Point::new(WIDTH, HEIGHT),
                 ),
                 -(scroll_x as isize),
                 -(scroll_y as isize),
@@ -221,16 +200,16 @@ impl Renderer {
                 scanline,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(scroll_x.into(), 240)),
-                256 - (scroll_x as isize),
+                Rectangle::new(Point::new(0, 0), Point::new(scroll_x.into(), HEIGHT)),
+                (WIDTH as isize) - (scroll_x as isize),
                 0,
             );
-        } else if (scanline + scroll_y as usize) > 240 {
+        } else if (scanline + scroll_y as usize) > HEIGHT {
             self.draw_nametable_scanline(
-                (scanline + scroll_y as usize) - 240,
+                (scanline + scroll_y as usize) - HEIGHT,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(256, 240)),
+                Rectangle::new(Point::new(0, 0), Point::new(WIDTH, HEIGHT)),
                 0,
                 (239 - scroll_y) as isize,
             );
@@ -239,7 +218,7 @@ impl Renderer {
                 scanline + scroll_y as usize,
                 bank,
                 second_nametable,
-                Rectangle::new(Point::new(0, 0), Point::new(256, 240)),
+                Rectangle::new(Point::new(0, 0), Point::new(WIDTH, HEIGHT)),
                 0,
                 -(scroll_y as isize),
             );
@@ -249,10 +228,6 @@ impl Renderer {
     pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
         for object in oam.iter() {
             // TODO: Apply sprite priority properly
-            // if object.behind_background {
-            //     continue;
-            // }
-
             let tile = self.get_tile(bank, object.tile_index);
             let palette = self.palette.sprite_entry(object.palette_index);
 
