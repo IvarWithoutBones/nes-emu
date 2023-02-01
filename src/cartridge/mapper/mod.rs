@@ -1,9 +1,12 @@
+mod mmc1;
 mod nrom;
 mod uxrom;
 
 pub use super::{Cartridge, Mirroring, PROGRAM_ROM_PAGE_SIZE, PROGRAM_ROM_START};
-use crate::bus::Device;
-use std::{cell::RefCell, ops::Range, rc::Rc};
+use {
+    crate::bus::Device,
+    std::{cell::RefCell, ops::Range, rc::Rc},
+};
 
 // Rc is used to allow the mapper to be shared between the bus and the PPU, which can
 // mutate it hence the RefCell. Trait objects are not sized, which a Box fixes.
@@ -52,6 +55,7 @@ impl From<Cartridge> for Box<dyn Mapper> {
     fn from(cart: Cartridge) -> Self {
         match cart.header.mapper_id {
             0 => Box::new(nrom::NROM::new(cart)),
+            1 => Box::new(mmc1::MMC1::new(cart)),
             2 => Box::new(uxrom::UxROM::new(cart)),
             _ => panic!("mapper {} not implemented", cart.header.mapper_id),
         }

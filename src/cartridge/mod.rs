@@ -17,6 +17,7 @@ pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
+    OneScreen,
 }
 
 impl fmt::Display for Mirroring {
@@ -25,6 +26,7 @@ impl fmt::Display for Mirroring {
             Self::Horizontal => write!(f, "horizontal"),
             Self::Vertical => write!(f, "vertical"),
             Self::FourScreen => write!(f, "four-screen"),
+            Self::OneScreen => write!(f, "one-screen"),
         }
     }
 }
