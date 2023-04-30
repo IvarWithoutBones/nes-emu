@@ -130,6 +130,7 @@
         packages = [
           pkgs.trunk
           rustToolchain
+          rustToolchain.availableComponents.rust-analyzer
         ];
 
         LD_LIBRARY_PATH = lib.optional hostPlatform.isLinux
