@@ -57,8 +57,6 @@ impl CpuCommunication {
             let mut step_state = StepState::default();
             let mut inserted_cartridge = false;
 
-            cpu.reset();
-
             loop {
                 if self.unload_rom_receiver.try_recv().is_ok() {
                     inserted_cartridge = false;
