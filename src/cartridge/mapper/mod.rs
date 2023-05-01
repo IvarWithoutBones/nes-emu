@@ -22,6 +22,10 @@ pub trait Mapper {
     fn read_ppu(&mut self, address: u16) -> u8;
     fn write_ppu(&mut self, address: u16, data: u8);
 
+    fn has_program_ram(&self) -> bool {
+        false
+    }
+
     fn read_cpu_range(&mut self, range: Range<usize>) -> Vec<u8> {
         range.map(|address| self.read_cpu(address as u16)).collect()
     }
@@ -48,7 +52,13 @@ where
     T: Mapper + ?Sized,
 {
     fn contains(&self, address: u16) -> bool {
-        (0x6000..=0xFFFF).contains(&address)
+        let start = if self.has_program_ram() {
+            0x6000
+        } else {
+            PROGRAM_ROM_START
+        };
+
+        (start..=0xFFFF).contains(&address)
     }
 }
 

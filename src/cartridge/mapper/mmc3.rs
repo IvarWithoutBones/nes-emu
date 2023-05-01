@@ -199,4 +199,8 @@ impl Mapper for MMC3 {
     fn write_ppu(&mut self, _address: u16, _value: u8) {
         unimplemented!()
     }
+
+    fn has_program_ram(&self) -> bool {
+        true
+    }
 }
