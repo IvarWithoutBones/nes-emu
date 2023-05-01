@@ -89,6 +89,7 @@ impl Header {
     }
 
     /// Dummy header for testing
+    #[cfg(test)]
     const fn generate() -> [u8; HEADER_SIZE] {
         [
             Self::SIGNATURE[0],
@@ -161,7 +162,7 @@ impl Cartridge {
     }
 
     /// Generate a dummy cartridge with the given program, used for tests
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new_dummy(data: Vec<u8>) -> Result<Cartridge, String> {
         let header = Header::generate().to_vec();
         let mut program: Vec<u8> = vec![header, data].concat();

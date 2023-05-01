@@ -261,6 +261,7 @@ impl Clock for Ppu {
         const VBLANK_SCANLINE: ScanlineCount = 241;
 
         self.cycles += cycles;
+
         if self.cycles >= CYCLES_PER_SCANLINE {
             if self.is_sprite_zero_hit(self.cycles) {
                 self.status.set_sprite_zero(true);

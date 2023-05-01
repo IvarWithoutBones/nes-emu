@@ -1,4 +1,5 @@
 mod mmc1;
+mod mmc3;
 mod nrom;
 mod uxrom;
 
@@ -47,7 +48,7 @@ where
     T: Mapper + ?Sized,
 {
     fn contains(&self, address: u16) -> bool {
-        address >= PROGRAM_ROM_START
+        (0x6000..=0xFFFF).contains(&address)
     }
 }
 
@@ -57,6 +58,7 @@ impl From<Cartridge> for Box<dyn Mapper> {
             0 => Box::new(nrom::NROM::new(cart)),
             1 => Box::new(mmc1::MMC1::new(cart)),
             2 => Box::new(uxrom::UxROM::new(cart)),
+            4 => Box::new(mmc3::MMC3::new(cart)),
             _ => panic!("mapper {} not implemented", cart.header.mapper_id),
         }
     }

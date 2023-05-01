@@ -4,11 +4,13 @@ use crate::{
     cpu::CpuRam,
     ppu::{self, renderer::PixelBuffer, Ppu},
 };
+#[cfg(test)]
+use std::sync::mpsc::channel;
 use std::{
     cell::RefCell,
     path::PathBuf,
     rc::Rc,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender},
     time,
 };
 
@@ -109,7 +111,7 @@ impl Bus {
     }
 
     /// Generate a dummy bus, used for tests
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn new_dummy(data: Vec<u8>) -> Self {
         let cartridge = Cartridge::new_dummy(data).unwrap_or_else(|err| {
             tracing::error!("failed to load cartridge: \"{}\"", err);
