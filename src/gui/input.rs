@@ -17,11 +17,11 @@ impl Input {
     }
 
     pub fn toggle_pause(&self, ctx: &egui::Context) -> bool {
-        ctx.input().key_pressed(egui::Key::P)
+        ctx.input(|i| i.key_pressed(egui::Key::P))
     }
 
     pub fn step(&self, ctx: &egui::Context) -> bool {
-        ctx.input().key_pressed(egui::Key::O)
+        ctx.input(|i| i.key_pressed(egui::Key::O))
     }
 
     // TODO: This is very, very ugly
@@ -29,35 +29,35 @@ impl Input {
     pub fn update(&self, ctx: &egui::Context) {
         let mut button = controller::Buttons::default();
 
-        if ctx.input().key_down(egui::Key::Z) {
+        if ctx.input(|i| i.key_down(egui::Key::Z)) {
             button |= controller::Buttons::A;
         }
 
-        if ctx.input().key_down(egui::Key::X) {
+        if ctx.input(|i| i.key_down(egui::Key::X)) {
             button |= controller::Buttons::B;
         }
 
-        if ctx.input().key_down(egui::Key::Space) {
+        if ctx.input(|i| i.key_down(egui::Key::Space)) {
             button |= controller::Buttons::Select;
         }
 
-        if ctx.input().key_down(egui::Key::Enter) {
+        if ctx.input(|i| i.key_down(egui::Key::Enter)) {
             button |= controller::Buttons::Start;
         }
 
-        if ctx.input().key_down(egui::Key::ArrowRight) {
+        if ctx.input(|i| i.key_down(egui::Key::ArrowRight)) {
             button |= controller::Buttons::Right;
         }
 
-        if ctx.input().key_down(egui::Key::ArrowLeft) {
+        if ctx.input(|i| i.key_down(egui::Key::ArrowLeft)) {
             button |= controller::Buttons::Left;
         }
 
-        if ctx.input().key_down(egui::Key::ArrowUp) {
+        if ctx.input(|i| i.key_down(egui::Key::ArrowUp)) {
             button |= controller::Buttons::Up;
         }
 
-        if ctx.input().key_down(egui::Key::ArrowDown) {
+        if ctx.input(|i| i.key_down(egui::Key::ArrowDown)) {
             button |= controller::Buttons::Down;
         }
 

@@ -80,7 +80,11 @@ impl Gui {
             log_level,
         };
 
-        eframe::run_native(window_title, options, Box::new(|_cc| Box::new(gui)));
+        eframe::run_native(window_title, options, Box::new(|_cc| Box::new(gui))).unwrap_or_else(
+            |err| {
+                tracing::error!("failed to run GUI: {}", err);
+            },
+        );
     }
 
     fn send_rom_path(&mut self, path: PathBuf) {
@@ -101,7 +105,7 @@ impl Gui {
     }
 
     fn update_dropped_files(&mut self, ctx: &egui::Context) {
-        for file in &ctx.input().raw.dropped_files.iter().last() {
+        for file in &ctx.input(|i| i.raw.dropped_files.iter().last().cloned()) {
             if let Some(path) = &file.path {
                 if path.extension().unwrap_or_default() == "nes" {
                     self.send_rom_path(path.to_path_buf());

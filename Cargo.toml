@@ -8,21 +8,21 @@ debug = true
 
 [dependencies]
 # Bit flag manipulation
-bitflags = "2.0.0-rc.1"
+bitflags = "2.2.1"
 
-# Gui utilities
-egui_memory_editor = "0.2.2"
-rfd = "0.10.0" # File dialog
+# GUI utilities
+egui_memory_editor = "0.2.3"
+rfd = "0.11.3" # File dialog
 
 # Logging
 tracing = "0.1.37"
 [dependencies.tracing-subscriber]
-version = "0.3.16"
+version = "0.3.17"
 features = ["env-filter"]
 
-# Gui itself
+# GUI
 [dependencies.eframe]
-version = "0.20.1"
+version = "0.21.3"
 default-features = false
 features = [
     "default_fonts",
@@ -31,12 +31,5 @@ features = [
 
 # Command line arguments
 [dependencies.clap]
-version = "4.0.29"
+version = "4.2.5"
 features = ["derive"]
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# Async runtime
-wasm-bindgen-futures = "0.4.33"
-# Logging
-console_error_panic_hook = "0.1.7"
-tracing-wasm = "0.2.1"
