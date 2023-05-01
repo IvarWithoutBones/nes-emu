@@ -131,9 +131,9 @@ impl Renderer {
     ) {
         // Position within the tile
         let y_offset = scanline % PIXELS_PER_TILE;
-
         // Loop over each tile in the scanline
         let tile_y = scanline / PIXELS_PER_TILE;
+
         for tile_x in 0..TILES_PER_ROW {
             let tile = {
                 let index = nametable.get_tile_index(tile_x, tile_y);
