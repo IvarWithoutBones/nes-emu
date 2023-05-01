@@ -68,11 +68,13 @@ impl Control {
         }
     }
 
-    pub fn sprite_bank(&self) -> usize {
-        if self.contains(Self::SpritePatternTableBank) {
-            0x1000
+    pub fn sprite_bank(&self) -> Option<usize> {
+        if self.contains(Self::SpriteSize) {
+            None // 8x16 sprites, we dont have the data to determine the bank here
+        } else if self.contains(Self::SpritePatternTableBank) {
+            Some(0x1000)
         } else {
-            0
+            Some(0)
         }
     }
 

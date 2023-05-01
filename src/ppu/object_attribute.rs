@@ -108,13 +108,12 @@ pub struct Object {
 
 impl From<&[u8]> for Object {
     fn from(data: &[u8]) -> Self {
+        let tile_index = data[1] as usize;
         let attrs = ObjectAttrs::from_bits_truncate(data[2]);
         let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
         let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
         let behind_background = attrs.contains(ObjectAttrs::Priority);
 
-        // TODO: Ignoring 8x16 sprites for now
-        let tile_index = data[1] as usize;
         let palette_index = util::combine_bools(
             attrs.contains(ObjectAttrs::Palette1),
             attrs.contains(ObjectAttrs::Palette2),
@@ -136,6 +135,18 @@ impl From<&[u8]> for Object {
 }
 
 impl Object {
+    pub const fn bank_8x16(&self) -> usize {
+        if util::nth_bit(self.tile_index as _, 0) {
+            0x1000
+        } else {
+            0
+        }
+    }
+
+    pub const fn tile_index_8x16(&self) -> usize {
+        self.tile_index & 0b1111_1110
+    }
+
     pub const fn pixel_position(&self, x: usize, y: usize) -> (usize, usize) {
         const LEN: usize = PIXELS_PER_TILE - 1;
 

@@ -1,12 +1,10 @@
-use {
-    super::{
-        nametable::{Nametable, TILES_PER_ROW},
-        object_attribute::ObjectAttributeMemory,
-        palette::{Color, Palette, PaletteEntry, PALETTE_TABLE},
-    },
-    crate::{cartridge::MapperInstance, util},
-    std::sync::mpsc::Sender,
+use super::{
+    nametable::{Nametable, TILES_PER_ROW},
+    object_attribute::ObjectAttributeMemory,
+    palette::{Color, Palette, PaletteEntry, PALETTE_TABLE},
 };
+use crate::{cartridge::MapperInstance, util};
+use std::sync::mpsc::Sender;
 
 pub const WIDTH: usize = 256;
 pub const HEIGHT: usize = 240;
@@ -168,10 +166,18 @@ impl Renderer {
         }
     }
 
-    pub fn draw_sprites(&mut self, bank: usize, oam: &ObjectAttributeMemory) {
+    pub fn draw_sprites(&mut self, maybe_bank: Option<usize>, oam: &ObjectAttributeMemory) {
+        // TODO: Apply sprite priority properly
         for object in oam.iter() {
-            // TODO: Apply sprite priority properly
-            let tile = self.get_tile(bank, object.tile_index);
+            let (bank, tile_index) = {
+                if let Some(bank) = maybe_bank {
+                    (bank, object.tile_index)
+                } else {
+                    (object.bank_8x16(), object.tile_index_8x16())
+                }
+            };
+
+            let tile = self.get_tile(bank, tile_index);
             let palette = self.palette.sprite_entry(object.palette_index);
 
             self.for_pixels_in_tile(&tile, palette, |renderer, x, y, color| {
@@ -183,6 +189,22 @@ impl Renderer {
                 let (x, y) = object.pixel_position(x, y);
                 renderer.set_pixel(x, y, color);
             });
+
+            if maybe_bank.is_none() {
+                // 8x16 sprites are drawn effectively in two tiles, stacked on top
+                let tile = self.get_tile(bank, tile_index + 1);
+                let palette = self.palette.sprite_entry(object.palette_index);
+
+                self.for_pixels_in_tile(&tile, palette, |renderer, x, y, color| {
+                    if color == PALETTE_TABLE[0] {
+                        // Transparant
+                        return;
+                    }
+
+                    let (x, y) = object.pixel_position(x, y + BETWEEN_PLANES);
+                    renderer.set_pixel(x, y, color);
+                });
+            }
         }
     }
 
