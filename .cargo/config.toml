@@ -1,0 +1,5 @@
+# Dirty workaround for a stack overflow when the GUI spawns.
+# Not an issue on MacOS/Linux, those have an 8MB stack by default.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:8000000"]
+
