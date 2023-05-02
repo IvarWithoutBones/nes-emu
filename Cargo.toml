@@ -8,7 +8,7 @@ debug = true
 
 [dependencies]
 # Bit flag manipulation
-bitflags = "2.2.1"
+tartan-bitfield = "1.2.0"
 
 # GUI utilities
 egui_memory_editor = "0.2.3"

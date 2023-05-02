@@ -131,18 +131,21 @@ impl Ppu {
 
     #[tracing::instrument(skip(self), parent = &self.span)]
     fn read_status(&mut self) -> u8 {
-        let result = self.status.read();
-        tracing::trace!("returning status register: {}", self.status);
-        self.status.reset_vblank();
+        let result = u8::from(self.status);
+        tracing::trace!("status register: {:?}", self.status);
+        self.status.set_vblank_started(false);
         self.address.reset_latch();
         self.scroll.reset_latch();
         result
     }
 
     fn write_control(&mut self, data: u8) {
-        let nmi_before = self.control.nmi_at_vblank();
+        let nmi_before = self.control.non_maskable_interrupt_at_vblank();
         self.control = registers::Control::from(data);
-        if !nmi_before && self.status.in_vblank() && self.control.nmi_at_vblank() {
+        if !nmi_before
+            && self.control.non_maskable_interrupt_at_vblank()
+            && self.status.vblank_started()
+        {
             self.trigger_nmi = true;
         }
     }
@@ -264,7 +267,7 @@ impl Clock for Ppu {
 
         if self.cycles >= CYCLES_PER_SCANLINE {
             if self.is_sprite_zero_hit(self.cycles) {
-                self.status.set_sprite_zero(true);
+                self.status.set_sprite_zero_hit(true);
             }
 
             self.cycles -= CYCLES_PER_SCANLINE;
@@ -272,8 +275,11 @@ impl Clock for Ppu {
 
             if self.scanline < VBLANK_SCANLINE && self.mask.show_background() {
                 let mirroring = self.mapper.as_ref().unwrap().borrow().mirroring();
-                let (first_nametable, second_nametable) =
-                    Nametable::from(&self.vram, self.control.nametable_start(), mirroring);
+                let (first_nametable, second_nametable) = Nametable::from(
+                    &self.vram,
+                    NametableAddr::from(self.control.nametable_address() as u16),
+                    mirroring,
+                );
                 self.renderer.draw_scanline(
                     self.scanline.into(),
                     self.control.background_bank(),
@@ -283,11 +289,11 @@ impl Clock for Ppu {
             }
 
             if self.scanline == VBLANK_SCANLINE {
-                self.status.set_sprite_zero(false);
-                self.status.set_vblank();
-                tracing::debug!("entering vblank, status: {}", self.status);
+                self.status.set_sprite_zero_hit(false);
+                self.status.set_vblank_started(true);
+                tracing::debug!("entering vblank, status: {:?}", self.status);
 
-                if self.control.nmi_at_vblank() {
+                if self.control.non_maskable_interrupt_at_vblank() {
                     self.trigger_nmi = true;
                 }
 
@@ -303,8 +309,8 @@ impl Clock for Ppu {
                 // Drawn every pixel, starting over
                 self.scanline = 0;
                 self.trigger_nmi = false;
-                self.status.reset_vblank();
-                self.status.set_sprite_zero(false);
+                self.status.set_vblank_started(false);
+                self.status.set_sprite_zero_hit(false);
                 tracing::debug!("finished computing frame");
             }
         }

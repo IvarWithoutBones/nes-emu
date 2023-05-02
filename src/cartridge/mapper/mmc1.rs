@@ -1,10 +1,6 @@
-#![allow(dead_code, unused_imports, unused_variables)]
-
-use {
-    super::{Cartridge, Mapper, Mirroring, PROGRAM_ROM_PAGE_SIZE, PROGRAM_ROM_START},
-    crate::util,
-    bitflags::bitflags,
-};
+use super::{Cartridge, Mapper, Mirroring, PROGRAM_ROM_PAGE_SIZE, PROGRAM_ROM_START};
+use crate::util;
+use tartan_bitfield::bitfield;
 
 enum ProgramRomBank {
     Consecutive,
@@ -17,10 +13,8 @@ enum CharacterRomBank {
     Split,
 }
 
-bitflags! {
+bitfield! {
     /*
-        //  https://www.nesdev.org/wiki/MMC1#Control_(internal,_$8000-$9FFF)
-
         4bit0
         -----
         CPPMM
@@ -32,44 +26,26 @@ bitflags! {
         |                         3: fix last bank at $C000 and switch 16 KB bank at $8000)
         +----- CHR ROM bank mode (0: switch 8 KB at a time; 1: switch two separate 4 KB banks)
     */
-
-    struct ControlRegister: u8 {
-        const MirroringLow   = 0b0000_0001;
-        const MirroringHigh  = 0b0000_0010;
-        const ProgramRomLow  = 0b0000_0100;
-        const ProgramRomHigh = 0b0000_1000;
-        const CharacterRom   = 0b0001_0000;
-    }
-}
-
-impl Default for ControlRegister {
-    fn default() -> Self {
-        Self::ProgramRomHigh | Self::ProgramRomLow
+    /// https://www.nesdev.org/wiki/MMC1#Control_(internal,_$8000-$9FFF)
+    pub struct ControlRegister(u8) {
+        [0..=1] pub mirroring_mode: u8,
+        [2..=3] pub program_rom_bank_mode: u8,
+        [4] pub character_rom_bank_mode,
     }
 }
 
 impl ControlRegister {
     fn mirroring(&self) -> Mirroring {
-        let value = util::combine_bools(
-            self.contains(Self::MirroringHigh),
-            self.contains(Self::MirroringLow),
-        );
-
-        match value {
-            // 0 | 1 => Mirroring::OneScreen,
-            0 | 1 | 2 => Mirroring::Vertical,
+        match self.mirroring_mode() {
+            0 | 1 => Mirroring::OneScreen,
+            2 => Mirroring::Vertical,
             3 => Mirroring::Horizontal,
             _ => unreachable!(),
         }
     }
 
     fn program_rom_bank(&self) -> ProgramRomBank {
-        let value = util::combine_bools(
-            self.contains(Self::ProgramRomHigh),
-            self.contains(Self::ProgramRomLow),
-        );
-
-        match value {
+        match self.program_rom_bank_mode() {
             0 | 1 => ProgramRomBank::Consecutive,
             2 => ProgramRomBank::FixFirst,
             3 => ProgramRomBank::FixLast,
@@ -78,7 +54,7 @@ impl ControlRegister {
     }
 
     fn character_rom_bank(&self) -> CharacterRomBank {
-        if self.contains(Self::CharacterRom) {
+        if self.character_rom_bank_mode() {
             CharacterRomBank::Split
         } else {
             CharacterRomBank::Consecutive
@@ -116,7 +92,7 @@ impl MMC1 {
     fn reset_shift(&mut self) {
         self.shift_count = 0;
         self.shift_register = 0;
-        self.control = ControlRegister::from_bits_truncate(self.control.bits() | 0x0C);
+        self.control = ControlRegister(u8::from(self.control) | 0x0C);
     }
 
     fn read_shift(&self) -> u8 {
@@ -182,7 +158,7 @@ impl Mapper for MMC1 {
             self.shift_count = 0;
             match address {
                 (0x8000..=0x9FFF) => {
-                    self.control = ControlRegister::from_bits_truncate(self.read_shift());
+                    self.control = ControlRegister(self.read_shift());
                 }
 
                 (0xA000..=0xBFFF) => {

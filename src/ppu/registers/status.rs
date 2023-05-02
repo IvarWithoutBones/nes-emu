@@ -1,10 +1,7 @@
-use crate::util::FormatBitFlags;
-use bitflags::bitflags;
+use tartan_bitfield::bitfield;
 
-bitflags! {
+bitfield! {
     /*
-        https://www.nesdev.org/wiki/PPU_registers#PPUSTATUS
-
         7  bit  0
         ---- ----
         VSO. ....
@@ -20,52 +17,10 @@ bitflags! {
                    Set at dot 1 of line 241 (the line *after* the post-render line);
                    cleared after reading $2002 and at dot 1 of the pre-render line.
     */
-    pub struct Status: u8 {
-        const Unused         = 0b0001_1111;
-        const SpriteOverflow = 0b0010_0000;
-        const SpriteZeroHit  = 0b0100_0000;
-        const VBlankStarted  = 0b1000_0000;
-    }
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self::from_bits_truncate(0)
-    }
-}
-
-impl std::fmt::Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut string = String::with_capacity(3);
-        string.push(self.format(Self::VBlankStarted, 'V'));
-        string.push(self.format(Self::SpriteZeroHit, 'Z'));
-        string.push(self.format(Self::SpriteOverflow, 'O'));
-        write!(f, "{string}")
-    }
-}
-
-impl Status {
-    pub fn read(&self) -> u8 {
-        self.bits()
-    }
-
-    pub fn reset_vblank(&mut self) {
-        self.remove(Self::VBlankStarted);
-    }
-
-    pub fn set_vblank(&mut self) {
-        self.insert(Self::VBlankStarted);
-    }
-
-    pub fn in_vblank(&mut self) -> bool {
-        self.contains(Self::VBlankStarted)
-    }
-
-    pub fn set_sprite_zero(&mut self, value: bool) {
-        if value {
-            self.insert(Self::SpriteZeroHit);
-        } else {
-            self.remove(Self::SpriteZeroHit);
-        }
+    /// https://www.nesdev.org/wiki/PPU_registers#PPUSTATUS
+    pub struct Status(u8) {
+        [5] pub sprite_overflow,
+        [6] pub sprite_zero_hit,
+        [7] pub vblank_started,
     }
 }

@@ -4,8 +4,6 @@ use crate::{
     cpu::CpuRam,
     ppu::{self, renderer::PixelBuffer, Ppu},
 };
-#[cfg(test)]
-use std::sync::mpsc::channel;
 use std::{
     cell::RefCell,
     path::PathBuf,
@@ -109,18 +107,6 @@ impl Bus {
         }
         self.mapper.is_some()
     }
-
-    /// Generate a dummy bus, used for tests
-    #[cfg(test)]
-    pub fn new_dummy(data: Vec<u8>) -> Self {
-        let cartridge = Cartridge::new_dummy(data).unwrap_or_else(|err| {
-            tracing::error!("failed to load cartridge: \"{}\"", err);
-            std::process::exit(1);
-        });
-        let mut bus = Self::new(channel().1, channel().0, channel().1);
-        bus.load_cartridge(cartridge);
-        bus
-    }
 }
 
 impl Memory for Bus {
@@ -208,9 +194,9 @@ impl Clock for Bus {
         self.controller.update();
         self.cycles += cycles;
 
-        let vblank_before = self.ppu.status.in_vblank();
+        let vblank_before = self.ppu.status.vblank_started();
         self.ppu.tick(cycles);
-        let vblank_after = self.ppu.status.in_vblank();
+        let vblank_after = self.ppu.status.vblank_started();
 
         // TODO: Would be nice to move this to ppu::tick()
         if !vblank_before && vblank_after {

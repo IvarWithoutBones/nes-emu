@@ -1,8 +1,6 @@
-use {
-    super::{renderer::PIXELS_PER_TILE, VideoRam},
-    crate::cartridge::Mirroring,
-    std::ops::{Index, Range},
-};
+use super::{renderer::PIXELS_PER_TILE, VideoRam};
+use crate::cartridge::Mirroring;
+use std::ops::{Index, Range};
 
 pub const TILES_PER_ROW: usize = 32;
 pub const TILES_PER_COLUMN: usize = 30;

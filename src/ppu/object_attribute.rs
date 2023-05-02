@@ -1,9 +1,7 @@
-use {
-    super::renderer::PIXELS_PER_TILE,
-    crate::util,
-    bitflags::bitflags,
-    std::ops::{Index, Range},
-};
+use super::renderer::PIXELS_PER_TILE;
+use crate::util;
+use std::ops::{Index, Range};
+use tartan_bitfield::bitfield;
 
 /// https://www.nesdev.org/wiki/PPU_OAM
 pub struct ObjectAttributeMemory {
@@ -75,10 +73,8 @@ impl Index<usize> for ObjectAttributeMemory {
     }
 }
 
-bitflags! {
+bitfield! {
     /*
-        https://www.nesdev.org/wiki/PPU_OAM#Byte_2
-
         76543210
         ||||||||
         ||||||++- Palette (4 to 7) of sprite
@@ -87,49 +83,29 @@ bitflags! {
         |+------- Flip sprite horizontally
         +-------- Flip sprite vertically
     */
-    struct ObjectAttrs: u8 {
-        const Palette2       = 0b0000_0001;
-        const Palette1       = 0b0000_0010;
-        const Priority       = 0b0010_0000;
-        const FlipHorizontal = 0b0100_0000;
-        const FlipVertical   = 0b1000_0000;
+    /// https://www.nesdev.org/wiki/PPU_OAM#Byte_2
+    pub struct ObjectAttributes(u8) {
+        [0..=1] pub palette: u8,
+        [5] pub behind_background,
+        [6] pub flip_horizontal,
+        [7] pub flip_vertical,
     }
 }
 
 pub struct Object {
     pub x: usize,
     pub y: usize,
-    pub flip_horizontal: bool,
-    pub flip_vertical: bool,
-    pub behind_background: bool,
-    pub palette_index: usize,
+    pub attrs: ObjectAttributes,
     pub tile_index: usize,
 }
 
 impl From<&[u8]> for Object {
     fn from(data: &[u8]) -> Self {
-        let tile_index = data[1] as usize;
-        let attrs = ObjectAttrs::from_bits_truncate(data[2]);
-        let flip_horizontal = attrs.contains(ObjectAttrs::FlipHorizontal);
-        let flip_vertical = attrs.contains(ObjectAttrs::FlipVertical);
-        let behind_background = attrs.contains(ObjectAttrs::Priority);
-
-        let palette_index = util::combine_bools(
-            attrs.contains(ObjectAttrs::Palette1),
-            attrs.contains(ObjectAttrs::Palette2),
-        ) as usize;
-
-        let x = data[3] as usize;
-        let y = data[0] as usize;
-
         Self {
-            x,
-            y,
-            flip_horizontal,
-            flip_vertical,
-            behind_background,
-            palette_index,
-            tile_index,
+            attrs: ObjectAttributes::from(data[2]),
+            tile_index: data[1] as _,
+            x: data[3] as _,
+            y: data[0] as _,
         }
     }
 }
@@ -147,16 +123,16 @@ impl Object {
         self.tile_index & 0b1111_1110
     }
 
-    pub const fn pixel_position(&self, x: usize, y: usize) -> (usize, usize) {
+    pub fn pixel_position(&self, x: usize, y: usize) -> (usize, usize) {
         const LEN: usize = PIXELS_PER_TILE - 1;
 
-        let x = if self.flip_horizontal {
+        let x = if self.attrs.flip_horizontal() {
             (self.x + LEN) - x
         } else {
             self.x + x
         };
 
-        let y = if self.flip_vertical {
+        let y = if self.attrs.flip_vertical() {
             (self.y + LEN) - y
         } else {
             self.y + y

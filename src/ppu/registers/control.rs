@@ -1,12 +1,7 @@
-use {
-    crate::{ppu::nametable::NametableAddr, util},
-    bitflags::bitflags,
-};
+use tartan_bitfield::bitfield;
 
-bitflags! {
+bitfield! {
     /*
-        https://www.nesdev.org/wiki/PPU_registers#PPUCTRL
-
         7  bit  0
         ---- ----
         VPHB SINN
@@ -23,45 +18,29 @@ bitflags! {
         |          (0: read backdrop from EXT pins; 1: output color on EXT pins)
         +--------- Generate an NMI at the start of the vertical blanking interval (0: off; 1: on)
     */
-    pub struct Control: u8 {
-        const NametableLow                 = 0b0000_0001;
-        const NametableHigh                = 0b0000_0010;
-        const VramAdressIncrement          = 0b0000_0100;
-        const SpritePatternTableBank       = 0b0000_1000;
-        const BackgroundPatternBank        = 0b0001_0000;
-        const SpriteSize                   = 0b0010_0000;
-        const ParentChildSelect            = 0b0100_0000;
-        const NonMaskableInterruptAtVBlank = 0b1000_0000;
-    }
-}
-
-impl Default for Control {
-    fn default() -> Self {
-        Self::from_bits_truncate(0)
-    }
-}
-
-impl From<u8> for Control {
-    fn from(val: u8) -> Self {
-        Self::from_bits_truncate(val)
+    /// https://www.nesdev.org/wiki/PPU_registers#PPUCTRL
+    pub struct Control(u8) {
+        [0..=1] pub nametable_address: u8,
+        [2] pub vram_address_increment_bit,
+        [3] pub sprite_pattern_table_bank,
+        [4] pub background_pattern_table_bank,
+        [5] pub sprite_size,
+        [6] pub parent_child_select,
+        [7] pub non_maskable_interrupt_at_vblank,
     }
 }
 
 impl Control {
     pub fn vram_address_increment(&self) -> u8 {
-        if self.contains(Self::VramAdressIncrement) {
+        if self.vram_address_increment_bit() {
             32
         } else {
             1
         }
     }
 
-    pub fn nmi_at_vblank(&self) -> bool {
-        self.contains(Self::NonMaskableInterruptAtVBlank)
-    }
-
     pub fn background_bank(&self) -> usize {
-        if self.contains(Self::BackgroundPatternBank) {
+        if self.background_pattern_table_bank() {
             0x1000
         } else {
             0
@@ -69,20 +48,13 @@ impl Control {
     }
 
     pub fn sprite_bank(&self) -> Option<usize> {
-        if self.contains(Self::SpriteSize) {
-            None // 8x16 sprites, we dont have the data to determine the bank here
-        } else if self.contains(Self::SpritePatternTableBank) {
+        if self.sprite_size() {
+            // 8x16 sprite, bank will be ignored
+            None
+        } else if self.sprite_pattern_table_bank() {
             Some(0x1000)
         } else {
             Some(0)
         }
-    }
-
-    pub fn nametable_start(&self) -> NametableAddr {
-        let value = util::combine_bools(
-            self.contains(Self::NametableHigh),
-            self.contains(Self::NametableLow),
-        );
-        NametableAddr::from(value as u16)
     }
 }

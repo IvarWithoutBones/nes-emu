@@ -35,14 +35,11 @@
         overlays = [ (import rust-overlay) ];
       };
 
-      # Enable WASI cross compiling support
-      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-        targets = [ "wasm32-unknown-unknown" hostPlatform.config ];
-      };
-
-      craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
       hostPlatform = pkgs.stdenvNoCC.hostPlatform;
       lib = pkgs.lib;
+
+      rustToolchain = pkgs.rust-bin.stable.latest.default;
+      craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
       nes-emu = pkgs.callPackage
         ({ lib
@@ -57,10 +54,7 @@
          , libXrandr
          , libXi
          , libX11
-           # Darwin
-         , AppKit
-         , OpenGL
-           # GTK
+           # GTK, for the file picker
          , wrapGAppsHook
          , glib
          , atk
@@ -68,6 +62,9 @@
          , cairo
          , pango
          , gdk-pixbuf
+           # Darwin
+         , AppKit
+         , OpenGL
          }:
           craneLib.buildPackage {
             pname = "nes-emu";
@@ -107,9 +104,6 @@
               OpenGL
             ];
 
-            # TODO: remove
-            doCheck = false;
-
             meta = with lib; {
               license = licenses.asl20;
               platforms = platforms.unix;
@@ -128,7 +122,6 @@
         inputsFrom = [ nes-emu ];
 
         packages = [
-          pkgs.trunk
           rustToolchain
           rustToolchain.availableComponents.rust-analyzer
         ];

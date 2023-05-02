@@ -1,21 +1,4 @@
-use bitflags::BitFlags;
 use std::ops::{Index, IndexMut};
-
-/// Format a flag in a BitFlags enabled struct.
-pub trait FormatBitFlags {
-    fn format(&self, flag: Self, display: char) -> char;
-}
-
-impl<T: BitFlags> FormatBitFlags for T {
-    /// Format a flag to the given character if present, or a dash if not.
-    fn format(&self, flag: Self, display: char) -> char {
-        if self.contains(flag) {
-            display
-        } else {
-            '-'
-        }
-    }
-}
 
 /// Get the status of bit N in the given value.
 pub const fn nth_bit(value: u8, n: u8) -> bool {
@@ -97,5 +80,23 @@ impl<T, const N: usize> Index<usize> for CircularBuffer<T, N> {
 impl<T, const N: usize> IndexMut<usize> for CircularBuffer<T, N> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.data[self.current.wrapping_add(index) % N]
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_nth_bit() {
+        let value = 0b1010_1010;
+        assert!(!nth_bit(value, 0));
+        assert!(nth_bit(value, 1));
+        assert!(!nth_bit(value, 2));
+        assert!(nth_bit(value, 3));
+        assert!(!nth_bit(value, 4));
+        assert!(nth_bit(value, 5));
+        assert!(!nth_bit(value, 6));
+        assert!(nth_bit(value, 7));
     }
 }

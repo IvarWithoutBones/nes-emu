@@ -1,6 +1,6 @@
 use super::{default_frame, header_label};
 use crate::{
-    cpu::{flags::CpuFlags, CpuRam, CpuState},
+    cpu::{CpuRam, CpuState},
     glue::StepState,
     util::CircularBuffer,
 };
@@ -242,28 +242,29 @@ impl CpuDebugger {
             egui::Grid::new("flags_grid_one")
                 .striped(true)
                 .show(ui, |ui| {
-                    let header_text = format!("Flags (${:02X})", state.status);
+                    let header_text = format!("Flags (${:02X})", u8::from(state.status));
                     ui.label(egui::RichText::new(header_text).strong());
                     ui.end_row();
 
-                    label(ui, "Negative", state.status.contains(CpuFlags::Negative));
-                    label(ui, "Overflow", state.status.contains(CpuFlags::Overflow));
+                    label(ui, "Negative", state.status.negative());
+                    label(ui, "Overflow", state.status.overflow());
                     label(
                         ui,
                         "Interrupts disabled",
-                        state.status.contains(CpuFlags::InterruptsDisabled),
+                        state.status.interrupts_disabled(),
                     );
-                    label(ui, "Zero", state.status.contains(CpuFlags::Zero));
-                    label(ui, "Carry", state.status.contains(CpuFlags::Carry));
+                    label(ui, "Zero", state.status.zero());
+                    label(ui, "Carry", state.status.carry());
                 });
+
             egui::Grid::new("flags_grid_two")
                 .striped(true)
                 .show(ui, |ui| {
                     ui.end_row(); // Spacing because the previous grid contains the header label
 
-                    label(ui, "Decimal", state.status.contains(CpuFlags::Decimal));
-                    label(ui, "Break", state.status.contains(CpuFlags::Break));
-                    label(ui, "Break2", state.status.contains(CpuFlags::Break2));
+                    label(ui, "Decimal", state.status.decimal());
+                    label(ui, "Break", state.status.break_1());
+                    label(ui, "Break2", state.status.break_2());
                 });
         });
     }

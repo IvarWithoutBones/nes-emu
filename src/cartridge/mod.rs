@@ -1,10 +1,8 @@
 mod mapper;
 
 pub use mapper::MapperInstance;
-use {
-    bitflags::bitflags,
-    std::{fmt, path::PathBuf},
-};
+use std::{fmt, path::PathBuf};
+use tartan_bitfield::bitfield;
 
 // TODO: Nicer page abstraction
 pub const PROGRAM_ROM_START: u16 = 0x8000;
@@ -31,17 +29,35 @@ impl fmt::Display for Mirroring {
     }
 }
 
-// TODO: Implement more flags
-bitflags! {
-    struct Flags6: u8 {
-        const MIRRORING   = 0b0000_0001;
-        const TRAINER     = 0b0000_0100;
-        const FOUR_SCREEN = 0b0000_1000;
-        const MAPPER_LOW  = 0b1111_0000;
+bitfield! {
+    /// Flags 6 and 7 of the iNES header
+    pub struct Flags(u16) {
+        // https://www.nesdev.org/wiki/INES#Flags_6
+        [0] pub mirroring,
+        [1] pub persistent_memory,
+        [2] pub trainer,
+        [3] pub four_screen,
+        [4..=7] pub mapper_id_low: u8,
+
+        // https://www.nesdev.org/wiki/INES#Flags_7
+        [8..=11] pub mapper_id_high: u8,
+        [11..=13] pub ines: u8,
+        [14] pub playchoice_10,
+        [15] pub vs_unisystem,
+    }
+}
+
+impl Flags {
+    pub fn mapper_id(&self) -> u8 {
+        self.mapper_id_low() | self.mapper_id_high()
     }
 
-    struct Flags7: u8 {
-        const MAPPER_HIGH = 0b1111_0000;
+    pub fn ines_version(&self) -> Option<u8> {
+        match self.ines() {
+            0 => Some(1),
+            2 => Some(2),
+            _ => None,
+        }
     }
 }
 
@@ -56,6 +72,7 @@ pub struct Header {
 
 const HEADER_SIZE: usize = 16;
 
+/// https://www.nesdev.org/wiki/INES
 impl Header {
     const SIGNATURE: [u8; 4] = [b'N', b'E', b'S', 0x1A];
 
@@ -64,51 +81,35 @@ impl Header {
             return Err("Invalid ROM file".to_string());
         }
 
-        let flags_6 = Flags6::from_bits_retain(data[6]);
-        let flags_7 = Flags7::from_bits_retain(data[7]);
+        let flags = Flags::from(u16::from_le_bytes([data[6], data[7]]));
 
-        let mapper_id = ((flags_6.bits() & Flags6::MAPPER_LOW.bits()) >> 4)
-            | (flags_7.bits() & Flags7::MAPPER_HIGH.bits());
+        if flags.ines_version() != Some(1) {
+            return Err(format!(
+                "Unsupported iNES version: {}",
+                if let Some(version) = flags.ines_version() {
+                    version.to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            ));
+        }
 
-        let mirroring = match (
-            flags_6.contains(Flags6::FOUR_SCREEN),
-            flags_6.contains(Flags6::MIRRORING),
-        ) {
-            (true, _) => Mirroring::FourScreen,
-            (false, true) => Mirroring::Vertical,
-            (false, false) => Mirroring::Horizontal,
+        let mirroring = if flags.four_screen() {
+            Mirroring::FourScreen
+        } else {
+            match flags.mirroring() {
+                true => Mirroring::Vertical,
+                false => Mirroring::Horizontal,
+            }
         };
 
         Ok(Header {
-            has_trainer: flags_6.contains(Flags6::TRAINER),
+            has_trainer: flags.trainer(),
             program_rom_pages: data[4] as usize,
             character_rom_pages: data[5] as usize,
+            mapper_id: flags.mapper_id(),
             mirroring,
-            mapper_id,
         })
-    }
-
-    /// Dummy header for testing
-    #[cfg(test)]
-    const fn generate() -> [u8; HEADER_SIZE] {
-        [
-            Self::SIGNATURE[0],
-            Self::SIGNATURE[1],
-            Self::SIGNATURE[2],
-            Self::SIGNATURE[3],
-            1, // Program ROM pages
-            1, // Character ROM pages
-            0, // Flags 6
-            0, // Flags 7
-            0, // Flags 8
-            0, // Flags 9
-            0, // Flags 10
-            0, // Zero
-            0, // Zero
-            0, // Zero
-            0, // Zero
-            0, // Zero
-        ]
     }
 }
 
@@ -128,7 +129,6 @@ impl Cartridge {
         let character_rom_size = header.character_rom_pages * CHARACTER_ROM_PAGE_SIZE;
 
         let program_rom_start = HEADER_SIZE + if header.has_trainer { TRAINER_SIZE } else { 0 };
-
         let character_rom_start = program_rom_start + program_rom_size;
 
         tracing::debug!(header.has_trainer);
@@ -150,6 +150,7 @@ impl Cartridge {
             data[character_rom_start..(character_rom_start + character_rom_size)].to_vec();
 
         // Character RAM is used when there is none provided by the cartridge
+        // TODO: handle this from the mapper
         if header.character_rom_pages == 0 {
             character_rom.resize(CHARACTER_ROM_PAGE_SIZE, 0);
         }
@@ -159,20 +160,6 @@ impl Cartridge {
             character_rom,
             header,
         })
-    }
-
-    /// Generate a dummy cartridge with the given program, used for tests
-    #[cfg(test)]
-    pub fn new_dummy(data: Vec<u8>) -> Result<Cartridge, String> {
-        let header = Header::generate().to_vec();
-        let mut program: Vec<u8> = vec![header, data].concat();
-        let len = program.len();
-        program.resize(
-            PROGRAM_ROM_PAGE_SIZE + CHARACTER_ROM_PAGE_SIZE + len,
-            0xEA, // NOP
-        );
-        program[len] = 0x00; // BRK
-        Self::from_bytes(&program)
     }
 }
 

@@ -1,37 +1,36 @@
 use crate::{bus::Device, util};
-use bitflags::bitflags;
 use std::sync::mpsc::Receiver;
+use tartan_bitfield::bitfield;
 
-bitflags! {
-    #[derive(Default, Clone)]
-    pub struct Buttons: u8 {
-        const A      = 0b0000_0001;
-        const B      = 0b0000_0010;
-        const Select = 0b0000_0100;
-        const Start  = 0b0000_1000;
-        const Up     = 0b0001_0000;
-        const Down   = 0b0010_0000;
-        const Left   = 0b0100_0000;
-        const Right  = 0b1000_0000;
+pub const fn format_button_index(val: u8) -> &'static str {
+    match val {
+        0 => "A",
+        1 => "B",
+        2 => "Select",
+        3 => "Start",
+        4 => "Up",
+        5 => "Down",
+        6 => "Left",
+        7 => "Right",
+        _ => "Unknown",
     }
 }
 
-impl Buttons {
-    pub fn format_index(val: u8) -> &'static str {
-        match val {
-            0 => "A",
-            1 => "B",
-            2 => "Select",
-            3 => "Start",
-            4 => "Up",
-            5 => "Down",
-            6 => "Left",
-            7 => "Right",
-            _ => "Unknown",
-        }
+bitfield! {
+    /// https://www.nesdev.org/wiki/Standard_controller#Report
+    pub struct Buttons(u8) {
+        [0] pub a,
+        [1] pub b,
+        [2] pub select,
+        [3] pub start,
+        [4] pub up,
+        [5] pub down,
+        [6] pub left,
+        [7] pub right,
     }
 }
 
+/// https://www.nesdev.org/wiki/Standard_controller
 pub struct Controller {
     span: tracing::Span,
     button_receiver: Receiver<Buttons>,
@@ -65,10 +64,10 @@ impl Controller {
     pub fn read(&mut self) -> u8 {
         tracing::debug!(
             "reading controller button {}",
-            Buttons::format_index(self.index)
+            format_button_index(self.index)
         );
 
-        let result = util::nth_bit(self.buttons.bits(), self.index) as u8;
+        let result = util::nth_bit(self.buttons.into(), self.index) as u8;
         if !self.strobe {
             self.index = self.index.wrapping_add(1);
         }

@@ -4,7 +4,7 @@ use std::fmt;
 
 /// See https://www.nesdev.org/wiki/CPU_addressing_modes
 #[derive(Debug, PartialEq, Eq)]
-pub enum AdressingMode {
+pub enum AddressingMode {
     Implied,
     Relative,
     Immediate,
@@ -20,28 +20,28 @@ pub enum AdressingMode {
     ZeroPageY,
 }
 
-impl AdressingMode {
+impl AddressingMode {
     pub const fn has_arguments(&self) -> bool {
-        !matches!(self, AdressingMode::Implied | AdressingMode::Accumulator)
+        !matches!(self, AddressingMode::Implied | AddressingMode::Accumulator)
     }
 
     /// The length of an instruction, counting the identifier and arguments
     pub const fn len(&self) -> u16 {
         match self {
-            AdressingMode::Implied | AdressingMode::Accumulator => 1,
+            AddressingMode::Implied | AddressingMode::Accumulator => 1,
 
-            AdressingMode::Immediate
-            | AdressingMode::Relative
-            | AdressingMode::IndirectX
-            | AdressingMode::IndirectY
-            | AdressingMode::ZeroPage
-            | AdressingMode::ZeroPageX
-            | AdressingMode::ZeroPageY => 2,
+            AddressingMode::Immediate
+            | AddressingMode::Relative
+            | AddressingMode::IndirectX
+            | AddressingMode::IndirectY
+            | AddressingMode::ZeroPage
+            | AddressingMode::ZeroPageX
+            | AddressingMode::ZeroPageY => 2,
 
-            AdressingMode::Indirect
-            | AdressingMode::Absolute
-            | AdressingMode::AbsoluteX
-            | AdressingMode::AbsoluteY => 3,
+            AddressingMode::Indirect
+            | AddressingMode::Absolute
+            | AddressingMode::AbsoluteX
+            | AddressingMode::AbsoluteY => 3,
         }
     }
 
@@ -132,7 +132,7 @@ impl AdressingMode {
     }
 }
 
-impl fmt::Display for AdressingMode {
+impl fmt::Display for AddressingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Implied => write!(f, "implied"),

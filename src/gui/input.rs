@@ -30,39 +30,40 @@ impl Input {
         let mut button = controller::Buttons::default();
 
         if ctx.input(|i| i.key_down(egui::Key::Z)) {
-            button |= controller::Buttons::A;
+            button.set_a(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::X)) {
-            button |= controller::Buttons::B;
+            button.set_b(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::Space)) {
-            button |= controller::Buttons::Select;
+            button.set_select(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::Enter)) {
-            button |= controller::Buttons::Start;
+            button.set_start(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::ArrowRight)) {
-            button |= controller::Buttons::Right;
+            button.set_right(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::ArrowLeft)) {
-            button |= controller::Buttons::Left;
+            button.set_left(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::ArrowUp)) {
-            button |= controller::Buttons::Up;
+            button.set_up(true);
         }
 
         if ctx.input(|i| i.key_down(egui::Key::ArrowDown)) {
-            button |= controller::Buttons::Down;
+            button.set_down(true);
         }
 
-        if let Err(_e) = self.button_sender.send(button) {
-            // tracing::error!("failed to send button to controller: {}", e);
+        if let Err(e) = self.button_sender.send(button) {
+            tracing::error!("failed to send button to controller: {e}, CPU most likely crashed");
+            std::process::exit(1);
         }
     }
 }

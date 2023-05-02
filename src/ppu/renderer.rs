@@ -178,7 +178,7 @@ impl Renderer {
             };
 
             let tile = self.get_tile(bank, tile_index);
-            let palette = self.palette.sprite_entry(object.palette_index);
+            let palette = self.palette.sprite_entry(object.attrs.palette() as _);
 
             self.for_pixels_in_tile(&tile, palette, |renderer, x, y, color| {
                 if color == PALETTE_TABLE[0] {
@@ -193,7 +193,7 @@ impl Renderer {
             if maybe_bank.is_none() {
                 // 8x16 sprites are drawn effectively in two tiles, stacked on top
                 let tile = self.get_tile(bank, tile_index + 1);
-                let palette = self.palette.sprite_entry(object.palette_index);
+                let palette = self.palette.sprite_entry(object.attrs.palette() as _);
 
                 self.for_pixels_in_tile(&tile, palette, |renderer, x, y, color| {
                     if color == PALETTE_TABLE[0] {
