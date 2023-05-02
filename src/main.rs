@@ -1,3 +1,14 @@
+use self::{glue::EmulatorUi, gui::Gui};
+use clap::Parser;
+use tracing_subscriber::{
+    filter::{LevelFilter, ParseError},
+    fmt,
+    prelude::*,
+    reload::{self, Handle},
+    EnvFilter, Registry,
+};
+
+mod apu;
 mod bus;
 mod cartridge;
 mod controller;
@@ -6,19 +17,6 @@ mod glue;
 mod gui;
 mod ppu;
 mod util;
-
-use {
-    clap::Parser,
-    glue::EmulatorUi,
-    gui::Gui,
-    tracing_subscriber::{
-        filter::{LevelFilter, ParseError},
-        fmt,
-        prelude::*,
-        reload::{self, Handle},
-        EnvFilter, Registry,
-    },
-};
 
 pub type LogReloadHandle = Handle<EnvFilter, Registry>;
 

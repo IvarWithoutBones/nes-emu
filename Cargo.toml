@@ -10,6 +10,9 @@ debug = true
 # Bit flag manipulation
 tartan-bitfield = "1.2.0"
 
+# Audio
+cpal = "0.15.2"
+
 # GUI utilities
 egui_memory_editor = "0.2.3"
 rfd = "0.11.3" # File dialog

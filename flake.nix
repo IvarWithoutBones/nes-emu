@@ -44,6 +44,23 @@
 
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
+      # Fixes compilation of the `coreaudio-sys` crate on Darwin, needed for the `cpal` crate
+      coreAudioSdk = pkgs.symlinkJoin {
+        name = "CoreAudio-sdk";
+
+        paths = with pkgs.darwin.apple_sdk.frameworks; [
+          AudioToolbox
+          AudioUnit
+          CoreAudio
+          CoreFoundation
+        ];
+
+        postBuild = ''
+          mkdir $out/System
+          mv $out/Library $out/System
+        '';
+      };
+
       nes-emu = pkgs.callPackage
         ({ lib
            # Linux
@@ -57,6 +74,7 @@
          , libXrandr
          , libXi
          , libX11
+         , alsaLib
            # GTK, for the file picker
          , wrapGAppsHook
          , glib
@@ -68,6 +86,7 @@
            # Darwin
          , AppKit
          , OpenGL
+         , coreAudioSdk
          }:
           craneLib.buildPackage {
             pname = "nes-emu";
@@ -80,6 +99,8 @@
               "0.pre+date=${year}-${month}-${day}";
 
             src = craneLib.cleanCargoSource ./.;
+
+            COREAUDIO_SDK_PATH = lib.optional hostPlatform.isDarwin coreAudioSdk;
 
             nativeBuildInputs = lib.optionals hostPlatform.isLinux [
               cmake
@@ -102,6 +123,7 @@
               gdk-pixbuf
               atk
               gtk3
+              alsaLib
             ] ++ lib.optionals hostPlatform.isDarwin [
               AppKit
               OpenGL
@@ -112,7 +134,7 @@
               platforms = platforms.unix;
             };
           })
-        { inherit (pkgs.darwin.apple_sdk.frameworks) AppKit OpenGL; };
+        { inherit (pkgs.darwin.apple_sdk.frameworks) AppKit OpenGL; inherit coreAudioSdk; };
     in
     {
       packages.default = nes-emu;
@@ -128,6 +150,8 @@
           rustToolchain
           rustToolchain.availableComponents.rust-analyzer
         ];
+
+        COREAUDIO_SDK_PATH = lib.optional hostPlatform.isDarwin coreAudioSdk;
 
         LD_LIBRARY_PATH = lib.optional hostPlatform.isLinux
           (lib.makeLibraryPath nes-emu.buildInputs);

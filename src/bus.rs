@@ -1,6 +1,7 @@
 use crate::{
+    apu::Apu,
     cartridge::{Cartridge, MapperInstance},
-    controller,
+    controller::{self, Controller},
     cpu::CpuRam,
     ppu::{self, renderer::PixelBuffer, Ppu},
 };
@@ -51,13 +52,16 @@ pub trait Device {
 
 pub struct Bus {
     span: tracing::Span,
-    pub mapper: Option<MapperInstance>,
+
+    pub apu: Apu,
     pub cpu_ram: CpuRam,
-    pub cycles: CycleCount,
     pub ppu: Ppu,
-    pub controller: controller::Controller,
-    rom_receiver: Receiver<PathBuf>,
+    pub controller: Controller,
+    pub mapper: Option<MapperInstance>,
+
+    pub cycles: CycleCount,
     time_since_last_frame: time::Instant,
+    rom_receiver: Receiver<PathBuf>,
 }
 
 impl Bus {
@@ -73,11 +77,12 @@ impl Bus {
         Bus {
             span,
             rom_receiver,
+            apu: Apu::new(),
             mapper: None,
             ppu: Ppu::new(pixel_sender),
             cpu_ram: CpuRam::default(),
             cycles: 0,
-            controller: controller::Controller::new(button_receiver),
+            controller: Controller::new(button_receiver),
             time_since_last_frame: time::Instant::now(),
         }
     }
@@ -114,6 +119,8 @@ impl Memory for Bus {
     fn read_byte(&mut self, address: u16) -> u8 {
         if self.controller.contains(address) {
             self.controller.read()
+        } else if self.apu.contains(address) {
+            self.apu.read_byte(address)
         } else if self.cpu_ram.contains(address) {
             self.cpu_ram[address]
         } else if self
@@ -144,6 +151,8 @@ impl Memory for Bus {
     fn write_byte(&mut self, address: u16, data: u8) {
         if self.controller.contains(address) {
             self.controller.write(data);
+        } else if self.apu.contains(address) {
+            self.apu.write_byte(address, data)
         } else if self.cpu_ram.contains(address) {
             self.cpu_ram[address] = data;
         } else if let Some((register, mutability)) = ppu::registers::get_register(address) {
@@ -191,8 +200,10 @@ impl Memory for Bus {
 
 impl Clock for Bus {
     fn tick_impl(&mut self, cycles: CycleCount) {
-        self.controller.update();
         self.cycles += cycles;
+
+        self.apu.tick(cycles);
+        self.controller.update();
 
         let vblank_before = self.ppu.status.vblank_started();
         self.ppu.tick(cycles);
