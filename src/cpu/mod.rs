@@ -1,5 +1,4 @@
 mod addressing_mode;
-mod assembler;
 pub mod flags;
 mod instructions;
 
@@ -215,7 +214,7 @@ impl Clock for Cpu {
 }
 
 impl fmt::Display for Cpu {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:04X}  A:{:02X} X:{:02X} Y:{:02X} P:{:02X} SP:{:02X} C:{} {}",

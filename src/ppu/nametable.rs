@@ -55,6 +55,8 @@ impl NametableAddr {
             | (Mirroring::Horizontal, NametableAddr::BottomLeft)
             | (Mirroring::Horizontal, NametableAddr::BottomRight) => Self::TopRight,
 
+            (Mirroring::OneScreen, _) => Self::TopLeft,
+
             _ => {
                 let address = self as u16;
                 panic!("unsupported mirroring {mirroring} for nametable {address:04X}")
