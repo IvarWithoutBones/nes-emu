@@ -38,7 +38,10 @@
       hostPlatform = pkgs.stdenvNoCC.hostPlatform;
       lib = pkgs.lib;
 
-      rustToolchain = pkgs.rust-bin.stable.latest.default;
+      rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+        extensions = [ "rust-src" "clippy" "rustfmt" ];
+      };
+
       craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
       nes-emu = pkgs.callPackage
