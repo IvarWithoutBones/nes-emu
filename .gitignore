@@ -10,11 +10,10 @@
 
 # Emulator
 /roms
+/cheats
 *.log
-
-# WASM
-/dist
 
 # Profiling
 perf.data
 perf.data.old
+flamegraph.svg

@@ -2,6 +2,8 @@
 // The idea is to make this generic in the future, so that other GUI frameworks can be used.
 // It would also be nice to make the GUI emulator-agnostic, but that requires more work.
 
+use crate::cheat::{CheatReceiver, CheatRequest};
+
 use {
     crate::{bus, controller, cpu, ppu, LogReloadHandle},
     std::{
@@ -43,6 +45,7 @@ pub struct CpuCommunication {
     cpu_state_sender: Option<Sender<cpu::CpuState>>,
     step_receiver: Option<Receiver<StepState>>,
     reboot_receiver: Option<Receiver<()>>,
+    cheat_receiver: Option<CheatReceiver>,
 
     // TODO: switch to byte array receiver
     rom_receiver: Receiver<PathBuf>,
@@ -52,7 +55,13 @@ pub struct CpuCommunication {
 impl CpuCommunication {
     pub fn spawn(self) -> std::thread::JoinHandle<()> {
         std::thread::spawn(move || {
-            let bus = bus::Bus::new(self.button_receiver, self.pixel_sender, self.rom_receiver);
+            let bus = bus::Bus::new(
+                self.button_receiver,
+                self.pixel_sender,
+                self.rom_receiver,
+                self.cheat_receiver,
+            );
+
             let mut cpu = cpu::Cpu::new(bus);
             let mut step_state = StepState::default();
             let mut inserted_cartridge = false;
@@ -121,6 +130,8 @@ pub struct UiCommunication {
 
     pub rom_sender: Sender<PathBuf>,
     pub unload_rom_sender: Sender<()>,
+
+    pub cheat_sender: Option<Sender<CheatRequest>>,
 }
 
 pub trait EmulatorUi {
@@ -157,6 +168,13 @@ pub fn init(
         (None, None)
     };
 
+    let (cheat_sender, cheat_receiver) = if with_gui {
+        let (cheat_sender, cheat_receiver) = channel();
+        (Some(cheat_sender), Some(CheatReceiver::new(cheat_receiver)))
+    } else {
+        (None, None)
+    };
+
     let cpu_comm = CpuCommunication {
         rom_receiver,
         unload_rom_receiver,
@@ -165,9 +183,11 @@ pub fn init(
         cpu_state_sender,
         step_receiver,
         reboot_receiver,
+        cheat_receiver,
     };
 
     let ui_comm = UiCommunication {
+        cheat_sender,
         rom_sender,
         unload_rom_sender,
         button_sender,

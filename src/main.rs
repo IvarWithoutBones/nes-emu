@@ -1,5 +1,6 @@
 mod bus;
 mod cartridge;
+mod cheat;
 mod controller;
 mod cpu;
 mod glue;
@@ -60,6 +61,7 @@ impl EmulatorUi for Gui {
             ui.cpu_state_receiver.unwrap(),
             ui.button_sender,
             ui.pixel_receiver,
+            ui.cheat_sender.unwrap(),
             (ui.step_sender.unwrap(), ui.reboot_sender.unwrap()),
             (ui.rom_sender, ui.unload_rom_sender),
         );

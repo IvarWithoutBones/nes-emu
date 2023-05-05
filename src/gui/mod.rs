@@ -1,3 +1,5 @@
+use crate::cheat::{Cheat, CheatRequest};
+
 mod cpu_debugger;
 mod input;
 mod screen;
@@ -39,15 +41,20 @@ pub struct Gui {
 
     log_reload_handle: LogReloadHandle,
     log_level: LevelFilter,
+
+    cheat_sender: Sender<CheatRequest>,
+    cheats: Vec<(bool, Cheat)>,
 }
 
 impl Gui {
+    #[allow(clippy::too_many_arguments)] // TODO: fix this
     pub fn run(
         window_title: &str,
         log_reload_handle: LogReloadHandle,
         cpu_state_receiver: Receiver<CpuState>,
         button_sender: Sender<controller::Buttons>,
         pixel_receiver: Receiver<Box<PixelBuffer>>,
+        cheat_sender: Sender<CheatRequest>,
         (step_sender, reboot_sender): (Sender<StepState>, Sender<()>),
         (rom_sender, unload_rom_sender): (Sender<PathBuf>, Sender<()>),
     ) {
@@ -76,6 +83,9 @@ impl Gui {
             current_view: View::Screen,
             input: Input::new(button_sender),
 
+            cheat_sender,
+            cheats: Vec::new(),
+
             log_reload_handle,
             log_level,
         };
@@ -85,6 +95,27 @@ impl Gui {
                 tracing::error!("failed to run GUI: {}", err);
             },
         );
+    }
+
+    fn load_cheat_file(&mut self, path: PathBuf) {
+        tracing::info!("loading cheats from file: {}", path.display());
+        let maybe_file = std::fs::read_to_string(path);
+
+        if let Ok(file) = maybe_file {
+            self.cheats = Cheat::from_multiple(&file)
+                .filter_map(|cheat| {
+                    if cheat.ty.is_compare() {
+                        None // Only ReadSubstitute is currently supported
+                    } else {
+                        Some((false, cheat))
+                    }
+                })
+                .collect();
+
+            tracing::info!("loaded {} cheats", self.cheats.len());
+        } else {
+            tracing::error!("failed to load cheat file: {}", maybe_file.unwrap_err());
+        }
     }
 
     fn send_rom_path(&mut self, path: PathBuf) {
@@ -127,7 +158,6 @@ impl Gui {
                     ui.close_menu();
                     self.cpu_debugger.pause();
 
-                    // TODO: use the async file dialog for WASI targets
                     if let Some(file) = rfd::FileDialog::new()
                         .add_filter("NES ROM", &["nes"])
                         .pick_file()
@@ -192,6 +222,67 @@ impl Gui {
                 if cpu_debugger.clicked() {
                     tracing::info!("switching view to CPU debugger");
                     ui.close_menu();
+                }
+            });
+
+            ui.menu_button("Cheats", |ui| {
+                if ui.button("Load").clicked() {
+                    self.cpu_debugger.pause();
+                    ui.close_menu();
+
+                    if let Some(file) = rfd::FileDialog::new()
+                        .add_filter("Cheat File", &["cht"])
+                        .pick_file()
+                    {
+                        self.load_cheat_file(file);
+                    }
+
+                    self.cpu_debugger.unpause();
+                }
+
+                if ui.button("Clear").clicked() {
+                    tracing::info!("clearing cheats");
+                    ui.close_menu();
+                    self.cheats.clear();
+
+                    self.cheat_sender
+                        .send(CheatRequest::Clear)
+                        .unwrap_or_else(|err| {
+                            tracing::error!("failed to send clear cheat request: {err}");
+                        });
+                }
+
+                if !self.cheats.is_empty() {
+                    ui.separator();
+
+                    for (index, (enabled, cheat)) in &mut self.cheats.iter_mut().enumerate() {
+                        let name = cheat
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| format!("Cheat #{index}"));
+
+                        if ui.checkbox(enabled, name.clone()).clicked() {
+                            ui.close_menu();
+
+                            if *enabled {
+                                tracing::info!("adding cheat: {name}");
+                                self.cheat_sender
+                                    .send(CheatRequest::Add(cheat.clone()))
+                                    .unwrap_or_else(|err| {
+                                        tracing::error!("failed to send add cheat request: {err}");
+                                    });
+                            } else {
+                                tracing::info!("removing cheat: {name}");
+                                self.cheat_sender
+                                    .send(CheatRequest::Remove(cheat.clone()))
+                                    .unwrap_or_else(|err| {
+                                        tracing::error!(
+                                            "failed to send remove cheat request: {err}"
+                                        );
+                                    });
+                            }
+                        }
+                    }
                 }
             });
 

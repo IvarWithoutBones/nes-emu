@@ -1,6 +1,7 @@
 use crate::{
     cartridge::{Cartridge, MapperInstance},
-    controller,
+    cheat::CheatReceiver,
+    controller::{self, Controller},
     cpu::CpuRam,
     ppu::{self, renderer::PixelBuffer, Ppu},
 };
@@ -55,9 +56,11 @@ pub struct Bus {
     pub cpu_ram: CpuRam,
     pub cycles: CycleCount,
     pub ppu: Ppu,
-    pub controller: controller::Controller,
-    rom_receiver: Receiver<PathBuf>,
+    pub controller: Controller,
     time_since_last_frame: time::Instant,
+
+    rom_receiver: Receiver<PathBuf>,
+    cheat_receiver: Option<CheatReceiver>,
 }
 
 impl Bus {
@@ -67,6 +70,7 @@ impl Bus {
         button_receiver: Receiver<controller::Buttons>,
         pixel_sender: Sender<Box<PixelBuffer>>,
         rom_receiver: Receiver<PathBuf>,
+        cheat_receiver: Option<CheatReceiver>,
     ) -> Bus {
         let span = tracing::span!(tracing::Level::INFO, "bus");
         tracing::info!("succesfully initialized");
@@ -77,8 +81,9 @@ impl Bus {
             ppu: Ppu::new(pixel_sender),
             cpu_ram: CpuRam::default(),
             cycles: 0,
-            controller: controller::Controller::new(button_receiver),
+            controller: Controller::new(button_receiver),
             time_since_last_frame: time::Instant::now(),
+            cheat_receiver,
         }
     }
 
@@ -112,6 +117,13 @@ impl Bus {
 impl Memory for Bus {
     #[tracing::instrument(skip(self, address), parent = &self.span)]
     fn read_byte(&mut self, address: u16) -> u8 {
+        if let Some(cheat_receiver) = &self.cheat_receiver {
+            if let Some(cheat) = cheat_receiver.contains(address) {
+                assert!(!cheat.ty.is_compare()); // Only ReadSubstitute is supported
+                return cheat.value;
+            }
+        }
+
         if self.controller.contains(address) {
             self.controller.read()
         } else if self.cpu_ram.contains(address) {
@@ -191,6 +203,10 @@ impl Memory for Bus {
 
 impl Clock for Bus {
     fn tick_impl(&mut self, cycles: CycleCount) {
+        if let Some(cheat_receiver) = self.cheat_receiver.as_mut() {
+            cheat_receiver.update();
+        }
+
         self.controller.update();
         self.cycles += cycles;
 
